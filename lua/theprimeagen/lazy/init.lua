@@ -1,12 +1,4 @@
 return {
-
-    {
-        "nvim-lua/plenary.nvim",
-        name = "plenary"
-    },
-
-    -- "github/copilot.vim",
-    -- "eandrju/cellular-automaton.nvim",
-    "gpanders/editorconfig.nvim",
+  "nvim-lua/plenary.nvim",          -- lua functions that many plugins use
+  "christoomey/vim-tmux-navigator", -- tmux & split window navigation
 }
-
