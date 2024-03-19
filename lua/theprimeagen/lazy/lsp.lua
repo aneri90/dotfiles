@@ -36,11 +36,32 @@ return {
                 "lua_ls",
                 "rust_analyzer",
                 "tsserver",
+                "pyright",
+                "gopls",
+                "terraform-ls",
             },
             handlers = {
                 function(server_name) -- default handler (optional)
                     require("lspconfig")[server_name].setup {
                         capabilities = capabilities
+                    }
+                end,
+
+                ["pyright"] = function()
+                    local lspconfig = require("lspconfig")
+                    lspconfig.pyright.setup {
+                        capabilities = capabilities,
+                        settings = {
+                            pyright = { autoImportCompletion = true, },
+                            python = {
+                                analysis = {
+                                    autoSearchPaths = true,
+                                    diagnosticMode = 'openFilesOnly',
+                                    useLibraryCodeForTypes = true,
+                                    typeCheckingMode = 'off'
+                                }
+                            }
+                        }
                     }
                 end,
 
