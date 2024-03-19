@@ -38,7 +38,7 @@ return {
                 "tsserver",
                 "pyright",
                 "gopls",
-                "terraform-ls",
+                "terraformls",
             },
             handlers = {
                 function(server_name) -- default handler (optional)
