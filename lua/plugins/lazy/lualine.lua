@@ -3,22 +3,14 @@ return {
         "nvim-lualine/lualine.nvim",
         event = "VeryLazy",
         -- Optional dependencies
-		dependencies = { "nvim-tree/nvim-web-devicons" },
+        dependencies = { "nvim-tree/nvim-web-devicons" },
         config = function()
-            local function truncate_branch_name(branch)
+            local lazy_status = require("lazy.status") -- to configure lazy pending updates count
+            local function branch_name(branch)
                 if not branch or branch == "" then
                     return ""
                 end
-
-                -- Match the branch name to the specified format
-                local _, _, ticket_number = string.find(branch, "skdillon/sko%-(%d+)%-")
-
-                -- If the branch name matches the format, display sko-{ticket_number}, otherwise display the full branch name
-                if ticket_number then
-                    return "sko-" .. ticket_number
-                else
-                    return branch
-                end
+                return branch
             end
             require("lualine").setup({
                 options = {
@@ -29,7 +21,7 @@ return {
                 },
                 sections = {
                     lualine_b = {
-                        { "branch", icon = "", fmt = truncate_branch_name },
+                        { "branch", icon = "", fmt = branch_name },
                         "diff",
                         "diagnostics",
                     },
@@ -37,7 +29,12 @@ return {
                         { "filename", path = 1 },
                     },
                     lualine_x = {
-                        "filetype",
+                        {
+                            lazy_status.updates,
+                            cond = lazy_status.has_updates,
+                            color = { fg = "#ff9e64" },
+                        },
+                        { "filetype" },
                     },
                 },
             })
