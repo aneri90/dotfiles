@@ -1,9 +1,11 @@
 return {
     {
         "lukas-reineke/indent-blankline.nvim",
-        event = "VeryLazy",
+        event = { "BufReadPre", "BufNewFile" },
         config = function()
-            require("ibl").setup()
-        end
+            require("ibl").setup({
+                indent = { char = "┊" },
+            })
+        end,
     }
 }
