@@ -1,107 +1,127 @@
 return {
     {
-        'folke/neodev.nvim',
-        event = { 'BufReadPre', 'BufNewFile' },
+        "williamboman/mason.nvim",
+        lazy = false,
         config = function()
-            local neodev_status_ok, neodev = pcall(require, 'neodev')
-
-            if not neodev_status_ok then
-                return
-            end
-
-            neodev.setup()
-        end
-    },
-    {
-        'VonHeikemen/lsp-zero.nvim',
-        event = { 'BufReadPre', 'BufNewFile' },
-        cmd = 'Mason',
-        branch = 'v2.x',
-        dependencies = {
-            { 'neovim/nvim-lspconfig' },
-            {
-                'williamboman/mason.nvim',
-                build = function()
-                    pcall(vim.cmd, 'MasonUpdate')
-                end
-            },
-            { 'williamboman/mason-lspconfig.nvim', },
-
-            { 'hrsh7th/nvim-cmp' },
-            { 'hrsh7th/cmp-nvim-lsp' },
-            { 'L3MON4D3/LuaSnip' },
-            { 'SmiteshP/nvim-navic' }
-        },
-        config = function()
-            local lsp = require('lsp-zero').preset({})
-
-            local navic = require('nvim-navic')
-
-            lsp.on_attach(function(client, bufnr)
-                lsp.default_keymaps({ buffer = bufnr })
-                if client.server_capabilities.documentSymbolProvider then
-                    navic.attach(client, bufnr)
-                end
-            end)
-
-            require('lspconfig').lua_ls.setup(lsp.nvim_lua_ls())
-
-
-            lsp.ensure_installed({
-                'pyright',
-                'lua_ls',
-                'gopls',
-                'clangd',
-                "rust_analyzer",
-                "tsserver",
-                "terraformls",
-            })
-
-            lsp.setup()
-
-            local cmp = require('cmp')
-            -- local cmp_action = require('lsp-zero').cmp_action()
-
-            require('luasnip.loaders.from_vscode').lazy_load()
-
-            cmp.setup({
-                completion = {
-                    completeopt = "menu,menuone,preview,noselect",
-                },
-                preselect = cmp.PreselectMode.None,
-                sources = {
-                    { name = 'nvim_lsp' },
-                    { name = 'luasnip' },
-                },
-                mapping = cmp.mapping.preset.insert({
-                    ["<C-k>"] = cmp.mapping.select_prev_item(), -- previous suggestion
-                    ["<C-j>"] = cmp.mapping.select_next_item(), -- next suggestion
-                    ["<C-b>"] = cmp.mapping.scroll_docs(-4),
-                    ["<C-f>"] = cmp.mapping.scroll_docs(4),
-                    ["<C-Space>"] = cmp.mapping.complete(), -- show completion suggestions
-                    ["<C-e>"] = cmp.mapping.abort(),        -- close completion window
-                    ["<CR>"] = cmp.mapping.confirm({ select = false }),
-                }),
-                window = {
-                    completion = cmp.config.window.bordered(),
-                    documentation = cmp.config.window.bordered(),
-                },
-                snippet = {
-                    expand = function(args)
-                        require('luasnip').lsp_expand(args.body)
-                    end
+            require("mason").setup({
+                ui = {
+                    border = "rounded",
+                    icons = {
+                        package_installed = "",
+                        package_pending = "",
+                        package_uninstalled = "",
+                    },
                 }
             })
-        end
+        end,
     },
-    { 'saadparwaiz1/cmp_luasnip' },
-    { 'rafamadriz/friendly-snippets' },
-    -- {
-    --     'dgagn/diagflow.nvim',
-    --     opts = {
-    --         -- placement = 'inline',
-    --         scope = 'line',
-    --         padding_right = 5
-    --     }
-    -- }
+    {
+        "williamboman/mason-lspconfig.nvim",
+        lazy = false,
+        opts = {
+            auto_install = true,
+        },
+    },
+    {
+        "neovim/nvim-lspconfig",
+        lazy = false,
+        config = function()
+            -- LSP servers and clients are able to communicate to each other what
+            -- features they support. By default, neovim doesn't support everything
+            -- that is in the LSP specfication. When you add nvim-cmp, luasnip, etc.
+            -- Neovim now has *more* capabilities. So we create new capabilities with
+            -- nvim_cmp, and then broadast that to the servers.
+            local capabilities = vim.lsp.protocol.make_client_capabilities()
+            capabilities = vim.tbl_deep_extend('force', capabilities, require('cmp_nvim_lsp').default_capabilities())
+
+            local util = require "lspconfig/util"
+            local lspconfig = require("lspconfig")
+
+            lspconfig.tsserver.setup({
+                capabilities = capabilities
+            })
+
+            lspconfig.gopls.setup({
+                capabilities = capabilities,
+                filetypes = { "go", "gomod", "gowork", "gotmpl" },
+                root_dir = util.root_pattern("go.work", "go.mod", ".git"),
+                settings = {
+                    gopls = {
+                        codelenses = {
+                            gc_details = false,
+                            generate = true,
+                            regenerate_cgo = true,
+                            run_govulncheck = true,
+                            test = true,
+                            tidy = true,
+                            upgrade_dependency = true,
+                            vendor = true,
+                        },
+                        hints = {
+                            assignVariableTypes = true,
+                            compositeLiteralFields = true,
+                            compositeLiteralTypes = true,
+                            constantValues = true,
+                            functionTypeParameters = true,
+                            parameterNames = true,
+                            rangeVariableTypes = true,
+                        },
+                        analyses = {
+                            fieldalignment = true,
+                            nilness = true,
+                            unusedparams = true,
+                            unusedwrite = true,
+                            useany = true,
+                        },
+                        usePlaceholders = true,
+                        completeUnimported = true,
+                        staticcheck = true,
+                        directoryFilters = { "-.git", "-.vscode", "-.idea", "-.vscode-test", "-node_modules" },
+                    },
+                }
+            })
+
+            lspconfig.terraformls.setup({
+                capabilities = capabilities
+            })
+
+            lspconfig.yamlls.setup({
+                capabilities = capabilities
+            })
+
+            lspconfig.dockerls.setup({
+                capabilities = capabilities
+            })
+
+            lspconfig.bashls.setup({
+                capabilities = capabilities
+            })
+
+            lspconfig.lua_ls.setup({
+                capabilities = capabilities,
+                settings = {
+                    Lua = {
+                        diagnostics = {
+                            globals = { "vim", "it", "describe", "before_each", "after_each" },
+                        }
+                    }
+                }
+            })
+
+            lspconfig.pyright.setup({
+                capabilities = capabilities,
+                settings = {
+                    pyright = { autoImportCompletion = true, },
+                    python = {
+                        analysis = {
+                            autoSearchPaths = true,
+                            diagnosticMode = 'openFilesOnly',
+                            useLibraryCodeForTypes = true,
+                            typeCheckingMode = 'off'
+                        }
+                    }
+                }
+            })
+        end,
+    },
 }

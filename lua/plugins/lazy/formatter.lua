@@ -19,7 +19,9 @@ return {
                 graphql = { "prettier" },
                 liquid = { "prettier" },
                 lua = { "stylua" },
+                -- Conform will run multiple formatters sequentially
                 python = { "isort", "black" },
+                go = { "goimports-reviser", "gofmt", "golines" },
             },
             format_on_save = {
                 lsp_fallback = true,
