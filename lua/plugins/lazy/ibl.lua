@@ -4,7 +4,8 @@ return {
         event = { "BufReadPre", "BufNewFile" },
         config = function()
             require("ibl").setup({
-                indent = { char = "┊" },
+                -- ..
+                --[[                 indent = { char = "┊" }, ]]
             })
         end,
     }
