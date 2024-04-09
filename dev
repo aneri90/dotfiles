@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
+# neovim
 rm -rf ~/.config/nvim
-ln -s $(pwd) ~/.config/nvim
+ln -s $(pwd)/nvim ~/.config/nvim
+
+# tmux
+rm -rf ~/.tmux.conf
+ln -s $(pwd)/tmux/.tmux.conf ~/.tmux.conf
+
+# zsh
+rm -rf ~/.zshrc 
+ln -s $(pwd)/zsh/.zshrc ~/.zshrc
+
+# .local/bin
+rm ~/.local/bin/tmux-sessionizer
+ln -s $(pwd)/localbin/tmux-sessionizer ~/.local/bin/tmux-sessionizer
 
