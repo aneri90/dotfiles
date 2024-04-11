@@ -4,16 +4,20 @@ vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv")
 vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv")
 
+-- Keep screen centered when moving around
+vim.keymap.set('n', '<C-d>', '<C-d>zz', { desc = 'Move 1/2 screen down' })
+vim.keymap.set('n', '<C-u>', '<C-u>zz', { desc = 'Move 1/2 screen up' })
+vim.keymap.set('n', 'n', 'nzzzv', { desc = 'Next search result' })
+vim.keymap.set('n', 'N', 'Nzzzv', { desc = 'Previous search result' })
+vim.keymap.set('n', 'G', 'Gzz', { desc = 'Goto to end of file' })
+vim.keymap.set('n', '}', '}zz', { desc = 'Move one block down' })
+vim.keymap.set('n', '{', '{zz', { desc = 'Move one block up' })
 vim.keymap.set("n", "J", "mzJ`z")
-vim.keymap.set("n", "<C-d>", "<C-d>zz")
-vim.keymap.set("n", "<C-u>", "<C-u>zz")
-vim.keymap.set("n", "n", "nzzzv")
-vim.keymap.set("n", "N", "Nzzzv")
 
-vim.keymap.set("x", "<leader>p", [["_dP]]) -- Paste in visual mode without yanking replaced text
-vim.keymap.set({"n", "v"}, "<leader>d", [["_d]]) -- delete without yanking
-vim.keymap.set({"n", "v"}, "<leader>y", [["+y]]) -- yank to clipboard
-vim.keymap.set("n", "<leader>Y", [["+Y]]) -- yank line to clipboard
+vim.keymap.set("x", "<leader>p", [["_dP]])       -- Paste in visual mode without yanking replaced text
+vim.keymap.set({ "n", "v" }, "<leader>d", [["_d]]) -- delete without yanking
+vim.keymap.set({ "n", "v" }, "<leader>y", [["+y]]) -- yank to clipboard
+vim.keymap.set("n", "<leader>Y", [["+Y]])        -- yank line to clipboard
 
 -- This is going to get me cancelled
 vim.keymap.set("i", "<C-c>", "<Esc>")
@@ -35,10 +39,10 @@ vim.keymap.set("n", "<leader><leader>", function()
 end)
 
 -- window management
-vim.keymap.set("n", "<leader>sv", "<C-w>v", { desc = "Split window vertically" })                   -- split window vertically
-vim.keymap.set("n", "<leader>sh", "<C-w>s", { desc = "Split window horizontally" })                 -- split window horizontally
-vim.keymap.set("n", "<leader>se", "<C-w>=", { desc = "Make splits equal size" })                    -- make split windows equal width & height
-vim.keymap.set("n", "<leader>sx", "<cmd>close<CR>", { desc = "Close current split" })               -- close current split window
+vim.keymap.set("n", "<leader>sv", "<C-w>v", { desc = "Split window vertically" })     -- split window vertically
+vim.keymap.set("n", "<leader>sh", "<C-w>s", { desc = "Split window horizontally" })   -- split window horizontally
+vim.keymap.set("n", "<leader>se", "<C-w>=", { desc = "Make splits equal size" })      -- make split windows equal width & height
+vim.keymap.set("n", "<leader>sx", "<cmd>close<CR>", { desc = "Close current split" }) -- close current split window
 
 -- tab management
 vim.keymap.set("n", "<leader>to", "<cmd>tabnew<CR>", { desc = "Open new tab" })                     -- open new tab
