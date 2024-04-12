@@ -10,7 +10,13 @@ ln -s $(pwd)/tmux/.tmux.conf ~/.tmux.conf
 
 # zsh
 rm -rf ~/.zshrc 
-ln -s $(pwd)/zsh/.zshrc ~/.zshrc
+
+if [[ $(grep -i Microsoft /proc/version) ]]; then
+    echo "Bash is running on WSL"
+    ln -s $(pwd)/zsh/.zshrc-win ~/.zshrc
+else
+    ln -s $(pwd)/zsh/.zshrc ~/.zshrc
+fi
 
 # .local/bin
 rm ~/.local/bin/tmux-sessionizer || true
