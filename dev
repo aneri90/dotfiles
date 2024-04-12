@@ -13,6 +13,6 @@ rm -rf ~/.zshrc
 ln -s $(pwd)/zsh/.zshrc ~/.zshrc
 
 # .local/bin
-rm ~/.local/bin/tmux-sessionizer
+rm ~/.local/bin/tmux-sessionizer || true
 ln -s $(pwd)/localbin/tmux-sessionizer ~/.local/bin/tmux-sessionizer
 
