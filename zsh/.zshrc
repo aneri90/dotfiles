@@ -33,6 +33,9 @@ bindkey '^L' vi-forward-word
 bindkey '^k' up-line-or-search
 bindkey '^j' down-line-or-search
 
+# glab completions
+source <(glab completion -s zsh); compdef _glab glab
+
 # Where should I put you?
 bindkey -s ^f "tmux-sessionizer\n"
 
