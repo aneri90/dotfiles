@@ -23,8 +23,8 @@ return {
 					border = "rounded",
 				},
 				current_line_blame = false,
-				current_line_blame_formatter_opts = {
-					relative_time = true,
+				current_line_blame_opts = {
+					delay = 50,
 				},
 				-- count_chars = {
 				--     '⒈', '⒉', '⒊', '⒋', '⒌', '⒍', '⒎', '⒏', '⒐',
