@@ -21,7 +21,7 @@ return {
 				lua = { "stylua" },
 				-- Conform will run multiple formatters sequentially
 				python = { "isort", "black" },
-				go = { "goimports-reviser", "gofmt", "golines" },
+				go = { "goimports-reviser", "gofmt" },
 			},
 			format_on_save = function(bufnr)
 				-- Disable with a global or buffer-local variable
