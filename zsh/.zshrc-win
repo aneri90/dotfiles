@@ -59,6 +59,11 @@ alias a-jhip-stop='docker rm -f jhipster && sudo chown -R aleneri: ~/jhipster-ma
 ## ALIAS DOCKER BUILD
 alias docker-rebuild='docker compose build && docker compose up -d'
 
+# Git
+alias gc="git commit -m"
+alias gs="git status"
+alias glog="git log --graph --topo-order --pretty='%w(100,0,6)%C(yellow)%h%C(bold)%C(black)%d %C(cyan)%ar %C(green)%an%n%C(bold)%C(white)%s %N' --abbrev-commit"
+
 # k8s
 alias k='kubectl'
 alias kco-ls='kubectl config view | grep cluster:'
@@ -88,10 +93,11 @@ export PATH=/opt/homebrew/opt/python@3.11/libexec/bin:$PATH
 
 # zsh autosuggestion & bindings
 source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-bindkey '^w' autosuggest-execute
-bindkey '^e' autosuggest-accept
+#bindkey '^w' autosuggest-execute
+#bindkey '^e' autosuggest-accept
+bindkey '^ ' autosuggest-accept # this would bind ctrl + space to accept the current suggestion.
 bindkey '^u' autosuggest-toggle
-bindkey '^L' vi-forward-word
+#bindkey '^L' vi-forward-word
 bindkey '^k' up-line-or-search
 bindkey '^j' down-line-or-search
 
