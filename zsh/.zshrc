@@ -11,7 +11,7 @@ export LANG=en_US.UTF-8
 # zsh config & Theme
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
-plugins=(git colored-man-pages colorize macos zsh-syntax-highlighting vi-mode)
+plugins=(git colored-man-pages colorize macos zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
@@ -26,12 +26,17 @@ compinit
 
 # zsh autosuggestion & bindings
 source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-bindkey '^w' autosuggest-execute
-bindkey '^e' autosuggest-accept
+#bindkey '^w' autosuggest-execute
+#bindkey '^e' autosuggest-accept
+bindkey '^ ' autosuggest-accept # this would bind ctrl + space to accept the current suggestion.
 bindkey '^u' autosuggest-toggle
-bindkey '^L' vi-forward-word
+#bindkey '^L' vi-forward-word
 bindkey '^k' up-line-or-search
 bindkey '^j' down-line-or-search
+
+# zsh autosuggestion options
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#808080,underline'
+ZSH_AUTOSUGGEST_ACCEPT_WIDGETS=("${(@)ZSH_AUTOSUGGEST_ACCEPT_WIDGETS:#forward-char}") # disable right arrow key for completion
 
 # glab completions
 source <(glab completion -s zsh); compdef _glab glab
@@ -68,20 +73,16 @@ alias a-jhip-stop='docker rm -f jhipster && sudo chown -R aleneri: ~/jhipster-ma
 ## ALIAS DOCKER BUILD
 alias docker-rebuild='docker compose build && docker compose up -d'
 
-
-# source rancher desktop binaries (kubectl, docker, etc..)
-### MANAGED BY RANCHER DESKTOP START (DO NOT EDIT)
-export PATH="/Users/aleneri/.rd/bin:$PATH"
-### MANAGED BY RANCHER DESKTOP END (DO NOT EDIT)
+# Git
+alias gc="git commit -m"
+alias gs="git status"
+alias glog="git log --graph --topo-order --pretty='%w(100,0,6)%C(yellow)%h%C(bold)%C(black)%d %C(cyan)%ar %C(green)%an%n%C(bold)%C(white)%s %N' --abbrev-commit"
 
 # k8s
 alias k='kubectl'
 alias kco-ls='kubectl config view | grep cluster:'
 alias kco-switch='kubectl config use-context'
 source <(kubectl completion zsh)
-
-# REPLACE LIBRESSL WITH OPENSSL
-# export PATH="/usr/local/opt/openssl@1.1/bin:$PATH"
 
 # IDEA LAUNCHER
 export PATH="/Applications/IntelliJ\ IDEA.app/Contents/MacOS:$PATH"
