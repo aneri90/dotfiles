@@ -132,7 +132,7 @@ return {
 						},
 					},
 				},
-				gitlab_ci_ls = {},
+				-- gitlab-ci-ls = {},
 				terraformls = {},
 				yamlls = {},
 				helm_ls = {},
