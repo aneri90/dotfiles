@@ -38,6 +38,12 @@ bindkey '^j' down-line-or-search
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#808080,underline'
 ZSH_AUTOSUGGEST_ACCEPT_WIDGETS=("${(@)ZSH_AUTOSUGGEST_ACCEPT_WIDGETS:#forward-char}") # disable right arrow key for completion
 
+# Allow infinite reverse search history
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+HISTSIZE=-1
+SAVEHIST=-1
+
 # glab completions
 source <(glab completion -s zsh); compdef _glab glab
 
@@ -64,6 +70,7 @@ export NVM_DIR="$HOME/.nvm"
 # qol
 alias reload='source ~/.zshrc'
 alias fuck='sudo $(history -p \!\!)'
+alias gpc='git pull && code .'
 
 ## JHIPSTER DOCKER
 alias a-jhip-run='docker pull jhipster/jhipster:main && (docker rm jhipster || true) && sudo rm -rf ~/jhipster-main && mkdir ~/jhipster-main && docker container run --name jhipster -v ~/jhipster-main:/home/jhipster/app -d -t jhipster/jhipster:main && docker container exec -it --user root jhipster bash'
@@ -106,3 +113,9 @@ test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell
 # Generated for envman. Do not edit.
 [ -s "$HOME/.config/envman/load.sh" ] && source "$HOME/.config/envman/load.sh"
 
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/Users/aleneri/.lmstudio/bin"
+
+# pgdump in Path without postgres (brew install libpq)
+export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
