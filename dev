@@ -11,10 +11,14 @@ ln -s $(pwd)/tmux/.tmux.conf ~/.tmux.conf
 # zsh
 rm -rf ~/.zshrc 
 
-if [[ $(grep -i Microsoft /proc/version) ]]; then
-    echo "Bash is running on WSL"
+if [[ $(uname -a) =~ [Dd]arwin ]]; then
+    echo "Running on macOS"
+    ln -s "$(pwd)/zsh/.zshrc" ~/.zshrc
+elif [[ $(grep -i Microsoft /proc/version) ]]; then
+    echo "Running on WSL"
     ln -s $(pwd)/zsh/.zshrc-win ~/.zshrc
 else
+    echo "Running on Linux"
     ln -s $(pwd)/zsh/.zshrc ~/.zshrc
 fi
 
