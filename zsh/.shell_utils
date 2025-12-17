@@ -1,0 +1,33 @@
+# enable theprimeagen's tmux sessionizer keybinding
+bindkey -s ^f "tmux-sessionizer\n"
+
+# Function to recursively pull all nested Git repositories
+gpull() {
+  # Find all .git directories starting from the current directory,
+  # and execute a set of commands for each one.
+  find . -type d -name .git -print0 | while IFS= read -r -d $'\0' gitdir; do
+    # Get the parent directory path (the repository root)
+    # The parent is the directory containing the .git directory.
+    repo_root=$(dirname "$gitdir")
+    
+    # Skip if the directory is the current directory's .git (to avoid a double message)
+    if [[ "$repo_root" == "." ]]; then
+        continue
+    fi
+
+    echo ""
+    echo "================================================================"
+    echo "🔄 Entering Repository: $(basename "$(pwd)")/$repo_root"
+    echo "================================================================"
+    
+    # Change into the repository root
+    (
+      cd "$repo_root" 2>/dev/null || { echo "❌ Failed to enter $repo_root"; continue; }
+      
+      # Execute the pull command
+      git pull
+    )
+    
+    echo "✅ Pull complete for $repo_root"
+  done
+}

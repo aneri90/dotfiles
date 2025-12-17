@@ -1,0 +1,14 @@
+# Common environment variables for bash and zsh
+
+# Shell config
+export LANG=en_US.UTF-8
+
+#export EDITOR=/opt/homebrew/bin/nvim
+#export VISUAL=/opt/homebrew/bin/nvim
+
+# source local binaries
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.bin:$PATH"
+
+# Add npm global bin to PATH
+export PATH=~/.npm-global/bin:$PATH

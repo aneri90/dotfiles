@@ -1,0 +1,32 @@
+# Common aliases for bash and zsh
+
+# ls and grep with color output
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# qol
+alias reload='source ~/.zshrc'
+alias fuck='sudo $(history -p \!\!)'
+
+# Neovim
+alias nvc='cd $HOME/.config/nvim && nvim' # Neovim config Path shortcuts
+
+## JHIPSTER DOCKER
+alias a-jhip-run='docker pull jhipster/jhipster:main && (docker rm jhipster || true) && sudo rm -rf ~/jhipster-main && mkdir ~/jhipster-main && docker container run --name jhipster -v ~/jhipster-main:/home/jhipster/app -d -t jhipster/jhipster:main && docker container exec -it --user root jhipster bash'
+alias a-jhip-build-run='docker build -t jhipster/jhipster:main . && (docker rm jhipster || true) && sudo rm -rf ~/jhipster-main && mkdir ~/jhipster-main && docker container run --name jhipster -v ~/jhipster-main:/home/jhipster/app -d -t jhipster/jhipster:main && docker container exec -it --user root jhipster bash'
+alias a-jhip-stop='docker rm -f jhipster && sudo chown -R aleneri: ~/jhipster-main'
+
+## ALIAS DOCKER BUILD
+alias docker-rebuild='docker compose build && docker compose up -d'
+
+# Git
+alias gc="git commit -m"
+alias gs="git status"
+alias glog="git log --graph --topo-order --pretty='%w(100,0,6)%C(yellow)%h%C(bold)%C(black)%d %C(cyan)%ar %C(green)%an%n%C(bold)%C(white)%s %N' --abbrev-commit"
+
+# k8s
+alias kco-ls='kubectl config view | grep cluster:'
+alias kco-switch='kubectl config use-context'
+source <(kubectl completion zsh)
+
+
