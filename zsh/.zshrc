@@ -1,152 +1,68 @@
-# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
-# Initialization code that may require console input (password prompts, [y/n]
-# confirmations, etc.) must go above this block; everything else may go below.
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
+ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+[ ! -d $ZINIT_HOME ] && mkdir -p "$(dirname $ZINIT_HOME)"
+[ ! -d $ZINIT_HOME/.git ] && git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME"
+source "${ZINIT_HOME}/zinit.zsh"
 
-# Shell config
-export LANG=en_US.UTF-8
+# Add in zsh plugins
+# Initialize vi-mode immediately to avoid keybinding conflicts
+# ZVM_INIT_MODE=sourcing
+# zinit light jeffreytse/zsh-vi-mode
+zinit light zsh-users/zsh-syntax-highlighting
+zinit light zsh-users/zsh-completions
+zinit light zsh-users/zsh-autosuggestions
+zinit light Aloxaf/fzf-tab
 
-# zsh config & Theme
-export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME="powerlevel10k/powerlevel10k"
-plugins=(git colored-man-pages colorize macos zsh-syntax-highlighting)
-source $ZSH/oh-my-zsh.sh
+# This pulls just the key-bindings file from the Oh My Zsh library
+# It uses your system's terminfo database to automatically map keys (Arrows, Home, End, Delete) correctly for your specific terminal.
+zinit snippet OMZL::key-bindings.zsh
 
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+# History settings
+HISTFILE=~/.histfile
+HISTSIZE=1000
+SAVEHIST=1000
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_FIND_NO_DUPS
+setopt HIST_SAVE_NO_DUPS
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_SPACE
+HISTORY_IGNORE="(export *|curl *)"
 
-# Reevaluate the prompt string each time it's displaying a prompt
-setopt prompt_subst
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
-autoload bashcompinit && bashcompinit
+# The following lines were added by compinstall
+zstyle :compinstall filename '$HOME/.zshrc'
 autoload -Uz compinit
-compinit
+# Only regenerate completions once per day
+if [[ -n ${ZDOTDIR}/.zcompdump(#qN.mh+24) ]]; then
+    compinit
+else
+    compinit -C
+fi
+# End of compinstall
 
-# zsh autosuggestion & bindings
-source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-#bindkey '^w' autosuggest-execute
-#bindkey '^e' autosuggest-accept
+
+# Completion styling
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' menu no
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
+
+# zsh autosuggestion keybind
 bindkey '^ ' autosuggest-accept # this would bind ctrl + space to accept the current suggestion.
-bindkey '^u' autosuggest-toggle
-#bindkey '^L' vi-forward-word
-bindkey '^k' up-line-or-search
-bindkey '^j' down-line-or-search
 
-# zsh autosuggestion options
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#808080,underline'
-ZSH_AUTOSUGGEST_ACCEPT_WIDGETS=("${(@)ZSH_AUTOSUGGEST_ACCEPT_WIDGETS:#forward-char}") # disable right arrow key for completion
+# Source shared aliases, exports, and integrations
+[ -f ~/.shell_secrets ] && source ~/.shell_secrets
+[ -f ~/.shell_aliases ] && source ~/.shell_aliases
+[ -f ~/.shell_exports ] && source ~/.shell_exports
+[ -f ~/.shell_utils ] && source ~/.shell_utils
 
-# Allow infinite reverse search history
-# setopt HIST_IGNORE_DUPS
-# setopt HIST_IGNORE_SPACE
-# HISTSIZE=-1
-# SAVEHIST=-1
+# Shell integrations
+eval "$(fzf --zsh)"
+eval "$(starship init zsh)"
 
-# glab completions
-source <(glab completion -s zsh); compdef _glab glab
-
-# Where should I put you?
-bindkey -s ^f "tmux-sessionizer\n"
-
-# Load credentials
-source $HOME/.secrets.sh
-
-# Neovim
-alias v="/opt/homebrew/bin/nvim"
-alias vi="/opt/homebrew/bin/nvim"
-alias vim="/opt/homebrew/bin/nvim"
-alias neovim="/opt/homebrew/bin/nvim"
-alias nvc='cd $HOME/.config/nvim && vim' # Neovim config Path shortcuts
-export EDITOR=/opt/homebrew/bin/nvim
-export VISUAL=/opt/homebrew/bin/nvim
-
-# nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"  # This loads nvm
-[ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
-
-# qol
-alias reload='source ~/.zshrc'
-alias fuck='sudo $(history -p \!\!)'
-alias gpc='git pull && code .'
-
-## JHIPSTER DOCKER
-alias a-jhip-run='docker pull jhipster/jhipster:main && (docker rm jhipster || true) && sudo rm -rf ~/jhipster-main && mkdir ~/jhipster-main && docker container run --name jhipster -v ~/jhipster-main:/home/jhipster/app -d -t jhipster/jhipster:main && docker container exec -it --user root jhipster bash'
-alias a-jhip-build-run='docker build -t jhipster/jhipster:main . && (docker rm jhipster || true) && sudo rm -rf ~/jhipster-main && mkdir ~/jhipster-main && docker container run --name jhipster -v ~/jhipster-main:/home/jhipster/app -d -t jhipster/jhipster:main && docker container exec -it --user root jhipster bash'
-alias a-jhip-stop='docker rm -f jhipster && sudo chown -R aleneri: ~/jhipster-main'
-
-## ALIAS DOCKER BUILD
-alias docker-rebuild='docker compose build && docker compose up -d'
-
-# Git
-alias gc="git commit -m"
-alias gs="git status"
-alias glog="git log --graph --topo-order --pretty='%w(100,0,6)%C(yellow)%h%C(bold)%C(black)%d %C(cyan)%ar %C(green)%an%n%C(bold)%C(white)%s %N' --abbrev-commit"
-# Function to recursively pull all nested Git repositories
-gpull() {
-  # Find all .git directories starting from the current directory,
-  # and execute a set of commands for each one.
-  find . -type d -name .git -print0 | while IFS= read -r -d $'\0' gitdir; do
-    # Get the parent directory path (the repository root)
-    # The parent is the directory containing the .git directory.
-    repo_root=$(dirname "$gitdir")
-    
-    # Skip if the directory is the current directory's .git (to avoid a double message)
-    if [[ "$repo_root" == "." ]]; then
-        continue
-    fi
-
-    echo ""
-    echo "================================================================"
-    echo "🔄 Entering Repository: $(basename "$(pwd)")/$repo_root"
-    echo "================================================================"
-    
-    # Change into the repository root
-    (
-      cd "$repo_root" 2>/dev/null || { echo "❌ Failed to enter $repo_root"; continue; }
-      
-      # Execute the pull command
-      git pull
-    )
-    
-    echo "✅ Pull complete for $repo_root"
-  done
-}
-
-# k8s
-alias k='kubectl'
-alias kco-ls='kubectl config view | grep cluster:'
-alias kco-switch='kubectl config use-context'
-alias kco-show='kubectl config view --minify --flatten'
-source <(kubectl completion zsh)
-
-# IDEA LAUNCHER
-export PATH="/Applications/IntelliJ\ IDEA.app/Contents/MacOS:$PATH"
-
-# Go binaries in path
-export GOPATH="$HOME/go"
-export PATH="$GOPATH/bin:$PATH"
-
-# HOMEBREW CONFIGS
-export HOMEBREW_NO_ENV_HINTS=TRUE
-# python in path
-export PATH=/opt/homebrew/opt/python@3.11/libexec/bin:$PATH
-
-#THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
-export SDKMAN_DIR="$HOME/.sdkman"
-[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
-
+# MacOS iTerm2 & Zsh Shell Integration
 test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell_integration.zsh"
 
+zstyle ':completion:*:cd:*' tag-order local-directories directory-stack path-directories
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 
-# Generated for envman. Do not edit.
-[ -s "$HOME/.config/envman/load.sh" ] && source "$HOME/.config/envman/load.sh"
-
-
-# Added by LM Studio CLI (lms)
-export PATH="$PATH:/Users/aleneri/.lmstudio/bin"
-
-# pgdump in Path without postgres (brew install libpq)
-export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
+KEYTIMEOUT=1
