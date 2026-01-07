@@ -55,6 +55,18 @@ bindkey '^ ' autosuggest-accept # this would bind ctrl + space to accept the cur
 [ -f ~/.shell_exports ] && source ~/.shell_exports
 [ -f ~/.shell_utils ] && source ~/.shell_utils
 
+# NVM (Node Version Manager) integration
+source /usr/share/nvm/init-nvm.sh
+
+# direnv integration
+if command -v direnv >/dev/null 2>&1; then
+    if [ -n "$BASH_VERSION" ]; then
+        eval "$(direnv hook bash)"
+    elif [ -n "$ZSH_VERSION" ]; then
+        eval "$(direnv hook zsh)"
+    fi
+fi
+
 # Shell integrations
 eval "$(fzf --zsh)"
 eval "$(starship init zsh)"
