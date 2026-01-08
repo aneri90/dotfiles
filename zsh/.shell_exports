@@ -16,5 +16,8 @@ export PATH=~/.npm-global/bin:$PATH
 # pgdump in Path without postgres (brew install libpq)
 export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
 
+# SDKMAN configuration
 export SDKMAN_DIR="$HOME/.sdkman"
-[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
+
+# NVM (Node Version Manager) configuration
+export NVM_DIR="$HOME/.nvm"

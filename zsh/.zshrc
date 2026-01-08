@@ -55,8 +55,13 @@ bindkey '^ ' autosuggest-accept # this would bind ctrl + space to accept the cur
 [ -f ~/.shell_exports ] && source ~/.shell_exports
 [ -f ~/.shell_utils ] && source ~/.shell_utils
 
-# NVM (Node Version Manager) integration
-source /usr/share/nvm/init-nvm.sh
+# NVM (Node Version Manager) integration (Arch based)
+[[ -s "/usr/share/nvm/init-nvm.sh" ]] && source /usr/share/nvm/init-nvm.sh
+# NVM (Node Version Manager) integration (MacOs based)
+[[ -s "/opt/homebrew/opt/nvm/nvm.sh" ]] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+
+# SDKMAN integration
+[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
 
 # direnv integration
 if command -v direnv >/dev/null 2>&1; then
