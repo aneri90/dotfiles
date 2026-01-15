@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(tree -L 2:*)",
-      "Bash(stow:*)"
-    ]
-  }
-}
