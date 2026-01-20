@@ -1,5 +1,5 @@
 {
-  "title": "WoW Command to Option",
+  "title": "WoW Key Remaps",
   "rules": [
     {
       "description": "Swap Command and Option for World of Warcraft",
@@ -39,6 +39,143 @@
               "bundle_identifiers": [
                 "^com\\.blizzard\\.worldofwarcraft"
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "Use F1-F12 as standard function keys for World of Warcraft",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "f1" },
+          "to": [{ "key_code": "f1" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f2" },
+          "to": [{ "key_code": "f2" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f3" },
+          "to": [{ "key_code": "f3" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f4" },
+          "to": [{ "key_code": "f4" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f5" },
+          "to": [{ "key_code": "f5" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f6" },
+          "to": [{ "key_code": "f6" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f7" },
+          "to": [{ "key_code": "f7" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f8" },
+          "to": [{ "key_code": "f8" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f9" },
+          "to": [{ "key_code": "f9" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f10" },
+          "to": [{ "key_code": "f10" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f11" },
+          "to": [{ "key_code": "f11" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
+            }
+          ]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f12" },
+          "to": [{ "key_code": "f12" }],
+          "conditions": [
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": ["^com\\.blizzard\\.worldofwarcraft"]
             }
           ]
         }
