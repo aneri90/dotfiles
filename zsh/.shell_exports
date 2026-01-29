@@ -3,8 +3,8 @@
 # Shell config
 export LANG=en_US.UTF-8
 
-#export EDITOR=/opt/homebrew/bin/nvim
-#export VISUAL=/opt/homebrew/bin/nvim
+export EDITOR=nvim
+export VISUAL=nvim
 
 # source local binaries
 export PATH="$HOME/.local/bin:$PATH"
