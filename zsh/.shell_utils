@@ -1,5 +1,7 @@
 # enable theprimeagen's tmux sessionizer keybinding
-bindkey -s ^f "tmux-sessionizer\n"
+bindkey -s ^t "tmux-sessionizer\n"
+# my custom code navigator keybinding
+bindkey -s ^f "cd \$(code-navigator)\n"
 
 # Function to recursively pull all nested Git repositories
 gpull() {

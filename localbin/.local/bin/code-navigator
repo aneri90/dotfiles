@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+select-project() {
+    find ~ -mindepth 1 -maxdepth 8 \
+        -type d \( -name '.cache' -o -name 'node_modules' -o -name '.local' -o -name '.npm' -o -name '.cargo' -o -name '.rustup' -o -name '.nvm' -o -name 'go' -o -name '.wine' -o -name 'snap' \) -prune -o \
+        -type d -name '.git' -print |
+        sed -e 's/\/.git$//' |
+        fzf
+}
+
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+    selected=$(select-project)
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+echo "$selected"
