@@ -1,5 +1,5 @@
 # enable theprimeagen's tmux sessionizer keybinding
-bindkey -s ^t "tmux-sessionizer\n"
+# bindkey -s ^t "tmux-sessionizer\n"
 # my custom code navigator keybinding
 bindkey -s ^f "cd \$(code-navigator)\n"
 
