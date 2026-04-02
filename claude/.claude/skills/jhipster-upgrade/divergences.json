@@ -1,0 +1,96 @@
+[
+  {
+    "_comment": "This file tracks intentional divergences from stock JHipster. It is loaded by the /jhipster-upgrade skill and should be updated after each upgrade. Place a project-specific copy at .jhipster-divergences.json in the project root if you want per-project overrides.",
+    "_schema": {
+      "id": "Stable identifier (D1, D2, ...)",
+      "area": "build | database | config | security | tooling | dependencies",
+      "divergence": "What differs from stock JHipster",
+      "reason": "Why this divergence exists",
+      "action": "What to do during upgrades"
+    }
+  },
+  {
+    "id": "D1",
+    "area": "build",
+    "divergence": "No Jib plugin for Docker builds",
+    "reason": "Project uses custom Dockerfile",
+    "action": "Skip jib-maven-plugin in pom.xml plugins and pluginManagement"
+  },
+  {
+    "id": "D2",
+    "area": "build",
+    "divergence": "No src/main/docker/ folder",
+    "reason": "Project uses root docker-compose.yml and/or custom dev folder",
+    "action": "Skip all references to src/main/docker/ in config and scripts"
+  },
+  {
+    "id": "D3",
+    "area": "build",
+    "divergence": "No Maven frontend plugin",
+    "reason": "Pure microservice, no frontend",
+    "action": "Skip frontend-maven-plugin and node/npm related config"
+  },
+  {
+    "id": "D4",
+    "area": "database",
+    "divergence": "Different database engine than reference",
+    "reason": "Business requirement (e.g., MSSQL, Oracle instead of PostgreSQL)",
+    "action": "Keep project's DB driver, liquibase extensions, JDBC URLs, and test containers. Skip reference DB driver and test containers"
+  },
+  {
+    "id": "D5",
+    "area": "config",
+    "divergence": "No spring.docker.compose config",
+    "reason": "Custom docker-compose setup",
+    "action": "Remove spring.docker.compose section if copied from reference. Skip docker-compose profile"
+  },
+  {
+    "id": "D6",
+    "area": "config",
+    "divergence": "Custom ApplicationProperties with business-specific fields",
+    "reason": "Project-specific configuration beyond JHipster defaults",
+    "action": "MERGE new JHipster fields into existing class, never overwrite"
+  },
+  {
+    "id": "D7",
+    "area": "config",
+    "divergence": "Custom cache tuning in CacheConfiguration",
+    "reason": "Production resilience settings (e.g., TCP keepalive for cloud Redis)",
+    "action": "After copying reference CacheConfiguration, restore custom client bean, tuning, and entity cache entries"
+  },
+  {
+    "id": "D8",
+    "area": "security",
+    "divergence": "Custom security routes in SecurityConfiguration",
+    "reason": "Business endpoints with specific auth rules",
+    "action": "After copying reference SecurityConfiguration, restore all custom requestMatchers"
+  },
+  {
+    "id": "D9",
+    "area": "tooling",
+    "divergence": "No package.json, .husky/, .devcontainer/",
+    "reason": "Project uses CI/CD-provided tooling instead of npm",
+    "action": "Skip these files entirely"
+  },
+  {
+    "id": "D10",
+    "area": "dependencies",
+    "divergence": "Project-specific dependencies not in stock JHipster",
+    "reason": "Business requirements (e.g., cloud SDKs, PDF libs, custom drivers)",
+    "action": "Keep all project-specific deps. Never remove them during upgrade"
+  },
+  {
+    "id": "D11",
+    "area": "tooling",
+    "divergence": "No Maven wrapper (mvnw, mvnw.cmd, .mvn/)",
+    "reason": "CI provides Maven",
+    "action": "Skip Maven wrapper files"
+  },
+  {
+    "id": "D12",
+    "area": "tooling",
+    "divergence": "No sonar-project.properties / sonar-maven-plugin / properties-maven-plugin",
+    "reason": "Not used in this project",
+    "action": "Skip sonar and properties-maven-plugin"
+  }
+]
