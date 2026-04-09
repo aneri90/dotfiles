@@ -15,6 +15,7 @@ else
 fi
 
 if [[ -z $selected ]]; then
+  echo "$(pwd)"
   exit 0
 fi
 
