@@ -9,7 +9,7 @@
 ## Cloud & IaC
 
 - Google Cloud (`gcloud`) and Azure (`az` CLI) are the cloud providers.
-- Terraform is the IaC tool, managed via GitLab CI/CD pipelines to propagate infrastructure changes.
+- Terraform is the IaC tool, managed via GitLab CI/CD pipelines to propagate infrastructure changes. Never run `terraform plan` or `terraform apply` locally — let the pipeline handle it.
 
 ## Git workflow
 
