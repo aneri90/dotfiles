@@ -1,3 +1,6 @@
 .idea/
 .vscode/
-.claude/
+
+# Ignore the runtime ~/.claude state that lands at the repo root (Claude Code working dir),
+# but NOT the stow package at claude/.claude/ which we version.
+/.claude/
