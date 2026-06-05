@@ -1,9 +1,9 @@
 ---
 name: triage
-description: Triage a production alert for Sisred, Aipen, or Perfetto. Auto-detects the product AND environment from the pasted alert, pulls logs/traces from that product's Grafana and read-only state from its k8s cluster, and produces a root-cause analysis in chat. Use when the user pastes an alert (usually from Google Workspace) or asks to investigate a sisred/aipen/perfetto incident.
+description: Triage a production alert for Sisred, Aipen, Aicore, or Perfetto. Auto-detects the product AND environment from the pasted alert, pulls logs/traces from that product's Grafana and read-only state from its k8s cluster, and produces a root-cause analysis in chat. Use when the user pastes an alert (usually from Google Workspace) or asks to investigate a sisred/aipen/aicore/perfetto incident.
 ---
 
-# Alert triage — Sisred / Aipen / Perfetto
+# Alert triage — Sisred / Aipen / Aicore / Perfetto
 
 The user pastes an alert (usually copied from Google Workspace). The alert is
 self-describing: its `Service` / `Environment` / URL fields tell you **which product** and
@@ -16,6 +16,7 @@ a cluster, never run `terraform`, never commit.
 - **Product** — from the `Service` name prefix, hostnames, or the `Environment`/namespace:
   - `sisred-*`, `sisred-prod`, `sisred-test` → **sisred**
   - `aipen-*`, `aipen.maggiolicloud.it`, `aipen-prod` → **aipen**
+  - `aicore-*`, `aicore-prod`, `aicore-chat` → **aicore** (co-located in the aipen cluster — see §2)
   - `perfetto-*` → **perfetto**
 
   If the alert mentions two products (a cross-service error, e.g. *sisred-indexer* getting a
@@ -32,7 +33,7 @@ querying — easy for the user to spot a misdetect.
 
 Select the block for the detected product. `{ENV}` is the environment from §1.
 `LOKI_DATASOURCE_UID` / `TEMPO_DATASOURCE_UID` are the standard Grafana Cloud UIDs for all
-three (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
+four (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
 
 - `LOKI_DATASOURCE_UID=grafanacloud-logs`
 - `TEMPO_DATASOURCE_UID=grafanacloud-traces`
@@ -48,6 +49,17 @@ three (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
 - `K8S_NAMESPACE=aipen-{ENV}`
 - `GRAFANA_URL=https://aipenmonitoring.grafana.net`
 - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
+
+### aicore  (envs: dev, test, prod)
+aicore is **co-deployed inside the aipen cluster** (same AKS cluster + Grafana as aipen); it
+reuses aipen's context/Grafana and only the namespace differs:
+- `K8S_CONTEXT=aipen-{ENV}-k8s`
+- `K8S_NAMESPACE=aicore-{ENV}`
+- `GRAFANA_URL=https://aipenmonitoring.grafana.net`
+- `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
+
+Deploy source of truth: repo `aipen/infra/aipen-deploy` (helmfile, branch-per-env
+dev/test/main; `values/<env>/aicore.yaml`; per-service resources under `services.<name>.resources`).
 
 ### perfetto  (envs: test, prod)
 - `K8S_CONTEXT` — explicit map (the GCP **project** segment changes per env, so don't
