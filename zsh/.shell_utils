@@ -8,7 +8,9 @@ bindkey -s ^f "cd \$(code-navigator)\n"
 _gpull_one() {
   local repo=$1 resultfile=$2
   local rel=${repo#./}; rel=${rel:-.}
-  local out state header   # note: 'status' is a read-only special param in zsh
+  local out state header branch   # note: 'status' is a read-only special param in zsh
+
+  branch=$(git -C "$repo" symbolic-ref --short -q HEAD) || branch='(detached)'
 
   if ! git -C "$repo" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
     state=skip
@@ -33,7 +35,17 @@ _gpull_one() {
   else
     printf '%s\n\n' "$header"
   fi
-  printf '%s\t%s\n' "$state" "$rel" >> "$resultfile"
+  printf '%s\t%s\t%s\n' "$state" "$branch" "$rel" >> "$resultfile"
+}
+
+# Resolve a repo's remote (GitLab) default branch, e.g. "main"; empty if unknown.
+# Prefers the cached local origin/HEAD; falls back to one network query to set it.
+_gpull_default_branch() {
+  local repo=$1 def
+  def=$(git -C "$repo" symbolic-ref --short -q refs/remotes/origin/HEAD) \
+    || { git -C "$repo" remote set-head origin -a >/dev/null 2>&1 \
+         && def=$(git -C "$repo" symbolic-ref --short -q refs/remotes/origin/HEAD); }
+  print -r -- "${def#origin/}"
 }
 
 # Fast-forward-pull every Git repo at or under the current directory, in parallel.
@@ -41,9 +53,9 @@ _gpull_one() {
 # node_modules/target are never walked. Concurrency via $GPULL_JOBS (default 8; set 1 for serial).
 gpull() {
   emulate -L zsh
-  local repo tmp st name
-  local -i running=0 batch=${GPULL_JOBS:-8}
-  local -a repos oks fails skips warns
+  local repo tmp st name branch rel def ans
+  local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i
+  local -a repos oks fails skips warns off_repos off_branches
 
   # Leaf discovery: print a directory and stop descending as soon as it contains a .git
   # (dir OR file → covers normal repos, submodules and worktrees).
@@ -62,17 +74,72 @@ gpull() {
   done
   wait
 
-  while IFS=$'\t' read -r st name; do
+  while IFS=$'\t' read -r st branch name; do
     case $st in
       ok)   oks+=("$name") ;;
       warn) warns+=("$name") ;;
       fail) fails+=("$name") ;;
       skip) skips+=("$name") ;;
     esac
+    if [[ $branch != test && $branch != main ]]; then
+      off_repos+=("$name"); off_branches+=("$branch")
+    fi
   done < "$tmp"
   rm -f "$tmp"
 
   print -P "%B── gpull: ${#oks} ok, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
   (( ${#warns} )) && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
-  (( ${#fails} )) && print -P "   %F{red}failed:%f ${(j:, :)fails}"
+
+  # List 1 — pull errors.
+  if (( ${#fails} )); then
+    print -P "\n%F{red}%B✗ repos with pull errors (${#fails}):%b%f"
+    for name in "${fails[@]}"; do print -P "   %F{red}•%f $name"; done
+  fi
+
+  # List 2 — not on test/main.
+  if (( ${#off_repos} )); then
+    print -P "\n%F{yellow}%B⎇ repos not on test/main (${#off_repos}):%b%f"
+    for (( i = 1; i <= ${#off_repos}; i++ )); do
+      print -P "   %F{yellow}•%f ${off_repos[i]} %F{8}(${off_branches[i]})%f"
+    done
+  fi
+
+  # Offer to switch the off-branch repos to their GitLab default branch, then pull.
+  (( ${#off_repos} )) || return 0
+  if [[ -z $GPULL_ASSUME_YES ]] && [[ ! -t 0 ]]; then
+    print -P "   %F{8}(non-interactive shell — skipping switch prompt)%f"
+    return 0
+  fi
+  [[ -n $GPULL_ASSUME_YES ]] && switch_all=1
+
+  print -P "\n%BSwitch off-branch repos to their GitLab default branch (then pull)?%b"
+  for (( i = 1; i <= ${#off_repos}; i++ )); do
+    rel=${off_repos[i]}; branch=${off_branches[i]}
+    def=$(_gpull_default_branch "$rel")
+    if [[ -z $def ]]; then
+      print -P "   %F{8}$rel — no origin/default, skipped%f"; continue
+    fi
+    if [[ $def == $branch ]]; then
+      print -P "   %F{8}$rel — already on default ($def), skipped%f"; continue
+    fi
+    if (( ! switch_all )); then
+      print -Pn "   Switch %B$rel%b ($branch → $def)? [y/N/a/q] "
+      read -r ans
+      case ${ans:l} in
+        a|all)  switch_all=1 ;;
+        q|quit) break ;;
+        y|yes)  ;;
+        *)      continue ;;
+      esac
+    fi
+    if git -C "$rel" checkout "$def" >/dev/null 2>&1; then
+      if git -C "$rel" pull --ff-only --autostash >/dev/null 2>&1; then
+        print -P "   %F{green}✅ $rel → $def (pulled)%f"
+      else
+        print -P "   %F{yellow}⚠ $rel → $def (checked out; pull failed)%f"
+      fi
+    else
+      print -P "   %F{red}❌ $rel — checkout $def failed (uncommitted changes?)%f"
+    fi
+  done
 }
