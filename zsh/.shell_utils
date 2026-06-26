@@ -3,33 +3,76 @@
 # my custom code navigator keybinding
 bindkey -s ^f "cd \$(code-navigator)\n"
 
-# Function to recursively pull all nested Git repositories
-gpull() {
-  # Find all .git directories starting from the current directory,
-  # and execute a set of commands for each one.
-  find . -type d -name .git -print0 | while IFS= read -r -d $'\0' gitdir; do
-    # Get the parent directory path (the repository root)
-    # The parent is the directory containing the .git directory.
-    repo_root=$(dirname "$gitdir")
-    
-    # Skip if the directory is the current directory's .git (to avoid a double message)
-    if [[ "$repo_root" == "." ]]; then
-        continue
-    fi
+# Private helper: fast-forward-pull one repo and record its result.
+# Output is captured and emitted as a single block so parallel jobs don't interleave mid-line.
+_gpull_one() {
+  local repo=$1 resultfile=$2
+  local rel=${repo#./}; rel=${rel:-.}
+  local out state header   # note: 'status' is a read-only special param in zsh
 
-    echo ""
-    echo "================================================================"
-    echo "🔄 Entering Repository: $(basename "$(pwd)")/$repo_root"
-    echo "================================================================"
-    
-    # Change into the repository root
-    (
-      cd "$repo_root" 2>/dev/null || { echo "❌ Failed to enter $repo_root"; continue; }
-      
-      # Execute the pull command
-      git pull
-    )
-    
-    echo "✅ Pull complete for $repo_root"
+  if ! git -C "$repo" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+    state=skip
+    header=$(print -P "%F{yellow}⏭  ${rel} — no upstream, skipped%f"); out=""
+  elif out=$(git -C "$repo" pull --ff-only --autostash 2>&1); then
+    if [[ -n $(git -C "$repo" ls-files --unmerged) ]]; then
+      # ff succeeded but --autostash couldn't reapply cleanly: pull exits 0, yet the
+      # tree is left conflicted (local changes are safe in the stash). Don't fake a ✅.
+      state=warn
+      header=$(print -P "%F{magenta}⚠️  ${rel} — pulled, but autostash left conflicts (changes safe in \`git stash\`)%f")
+    else
+      state=ok
+      header=$(print -P "%F{green}✅ ${rel}%f")
+    fi
+  else
+    state=fail
+    header=$(print -P "%F{red}❌ ${rel} — pull failed%f")
+  fi
+
+  if [[ -n $out ]]; then
+    printf '%s\n%s\n\n' "$header" "$out"
+  else
+    printf '%s\n\n' "$header"
+  fi
+  printf '%s\t%s\n' "$state" "$rel" >> "$resultfile"
+}
+
+# Fast-forward-pull every Git repo at or under the current directory, in parallel.
+# Treats each repo as a leaf (won't descend into a repo's working tree), so heavy dirs like
+# node_modules/target are never walked. Concurrency via $GPULL_JOBS (default 8; set 1 for serial).
+gpull() {
+  emulate -L zsh
+  local repo tmp st name
+  local -i running=0 batch=${GPULL_JOBS:-8}
+  local -a repos oks fails skips warns
+
+  # Leaf discovery: print a directory and stop descending as soon as it contains a .git
+  # (dir OR file → covers normal repos, submodules and worktrees).
+  while IFS= read -r -d $'\0' repo; do
+    repos+=("$repo")
+  done < <(find . -type d -exec test -e '{}/.git' \; -prune -print0 2>/dev/null)
+
+  (( ${#repos} )) || { print -P "%F{yellow}No git repositories found here.%f"; return 0 }
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/gpull.XXXXXX") || return 1   # template → works on GNU + BSD/macOS
+  print -P "%B🔄 Pulling ${#repos} repos (up to ${batch} at a time)…%b\n"
+
+  for repo in "${repos[@]}"; do
+    _gpull_one "$repo" "$tmp" &
+    (( ++running >= batch )) && { wait; running=0 }
   done
+  wait
+
+  while IFS=$'\t' read -r st name; do
+    case $st in
+      ok)   oks+=("$name") ;;
+      warn) warns+=("$name") ;;
+      fail) fails+=("$name") ;;
+      skip) skips+=("$name") ;;
+    esac
+  done < "$tmp"
+  rm -f "$tmp"
+
+  print -P "%B── gpull: ${#oks} ok, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
+  (( ${#warns} )) && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
+  (( ${#fails} )) && print -P "   %F{red}failed:%f ${(j:, :)fails}"
 }
