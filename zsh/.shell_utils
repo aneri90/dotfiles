@@ -143,3 +143,187 @@ gpull() {
     fi
   done
 }
+
+# ── gclean: prune stale local GitLab checkouts under ~/gitlab-src ────────────────────────
+# Ask GitLab (via glab) about every checkout, then offer to act: remove deleted/archived ones
+# (rm -rf, guarded against losing uncommitted/unpushed/stashed work) or fix a renamed repo's
+# origin URL. Env: GCLEAN_ROOT (default ~/gitlab-src), GCLEAN_JOBS (default 8),
+# GCLEAN_DRY_RUN=1 or `-n` (classify only), GCLEAN_ASSUME_YES=1 (auto-confirm; still keeps
+# any repo that has local work).
+
+# origin URL → "group/.../project" on gitlab.com; non-zero if the remote isn't gitlab.com.
+_gclean_project_path() {
+  local url=$1
+  url=${url#*://}          # strip scheme (https://) if present
+  url=${url#*@}            # strip credentials / git@ user
+  case $url in
+    gitlab.com/*) url=${url#gitlab.com/} ;;
+    gitlab.com:*) url=${url#gitlab.com:} ;;   # ssh form, just in case
+    *) return 1 ;;
+  esac
+  print -r -- "${url%.git}"
+}
+
+# Classify one repo; append "state<TAB>work<TAB>info<TAB>rel" to $resultfile.
+# state ∈ active|archived|deleted|renamed|error|foreign|noremote
+_gclean_one() {
+  local repo=$1 root=$2 resultfile=$3
+  local rel=${repo#$root/}
+  local url proj enc body archived actual msg lsout state='' info='' work=''  # NB: 'path' is a special zsh param (→ $PATH)
+  local -a w
+
+  url=$(git -C "$repo" remote get-url origin 2>/dev/null)
+  [[ -z $url ]] && { printf 'noremote\037\037\037%s\n' "$rel" >> "$resultfile"; return }
+  proj=$(_gclean_project_path "$url") \
+    || { printf 'foreign\037\037%s\037%s\n' "$url" "$rel" >> "$resultfile"; return }
+  enc=${proj//\//%2F}
+
+  body=$(glab api "projects/$enc" 2>/dev/null)
+  archived=$(jq -r '.archived' <<< "$body" 2>/dev/null)   # NB: '.archived // empty' is wrong — jq // treats false as empty
+  if [[ $archived == true || $archived == false ]]; then
+    actual=$(jq -r '.path_with_namespace // empty' <<< "$body" 2>/dev/null)
+    if [[ -n $actual && ${actual:l} != ${proj:l} ]]; then
+      state=renamed; info="https://gitlab.com/${actual}.git"     # API resolved old→new path
+    elif [[ $archived == true ]]; then
+      state=archived
+    else
+      state=active
+    fi
+  else
+    msg=$(jq -r '.message // empty' <<< "$body" 2>/dev/null)
+    if [[ $msg == *404* ]]; then
+      lsout=$(GIT_TERMINAL_PROMPT=0 git -C "$repo" ls-remote origin 2>&1)
+      if (( $? == 0 )); then                                     # git redirect still works → moved
+        state=renamed
+        info=$(print -r -- "$lsout" | sed -n 's#.*redirecting to \(https*://[^ ]*\)#\1#p' | head -1)
+        info=${info%/}
+      else
+        state=deleted
+      fi
+    else
+      state=error; info=$msg
+    fi
+  fi
+
+  if [[ $state == archived || $state == deleted ]]; then        # only repos we might delete
+    [[ -n $(git -C "$repo" status --porcelain 2>/dev/null) ]] && w+=(uncommitted)
+    [[ -n $(git -C "$repo" stash list 2>/dev/null) ]] && w+=(stashed)
+    [[ -n $(git -C "$repo" log --branches --not --remotes -1 --oneline 2>/dev/null) ]] && w+=(unpushed)
+    work=${(j:,:)w}
+  fi
+
+  printf '%s\037%s\037%s\037%s\n' "$state" "$work" "$info" "$rel" >> "$resultfile"
+}
+
+gclean() {
+  emulate -L zsh
+  local root=${GCLEAN_ROOT:-$HOME/gitlab-src}
+  local -i dry=0 running=0 batch=${GCLEAN_JOBS:-8} n_active=0 rm_all=0 ren_all=0
+  [[ $1 == -n || $1 == --dry-run || -n $GCLEAN_DRY_RUN ]] && dry=1
+
+  [[ -d $root ]]            || { print -P "%F{red}gclean: $root not found.%f"; return 1 }
+  command -v glab >/dev/null || { print -P "%F{red}gclean: glab CLI not found.%f"; return 1 }
+  command -v jq   >/dev/null || { print -P "%F{red}gclean: jq not found.%f"; return 1 }
+
+  local repo tmp line st work info rel rec abs ans sfx
+  local -a repos recs arch del ren errs foreign noremote
+
+  while IFS= read -r -d $'\0' repo; do repos+=("$repo"); done \
+    < <(find "$root" -type d -exec test -e '{}/.git' \; -prune -print0 2>/dev/null)
+  (( ${#repos} )) || { print -P "%F{yellow}No git repositories under $root.%f"; return 0 }
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/gclean.XXXXXX") || return 1
+  print -P "%B🔎 Checking ${#repos} repos under ${root/#$HOME/~} against GitLab (up to ${batch} at a time)…%b"
+  for repo in "${repos[@]}"; do
+    _gclean_one "$repo" "$root" "$tmp" &
+    (( ++running >= batch )) && { wait; running=0 }
+  done
+  wait
+
+  while IFS= read -r line; do recs+=("$line"); done < "$tmp"
+  rm -f "$tmp"
+
+  for line in "${recs[@]}"; do
+    IFS=$'\037' read -r st work info rel <<< "$line"
+    case $st in
+      active)   (( n_active++ )) ;;
+      archived) arch+=("$line") ;;
+      deleted)  del+=("$line") ;;
+      renamed)  ren+=("$line") ;;
+      error)    errs+=("$line") ;;
+      foreign)  foreign+=("$line") ;;
+      noremote) noremote+=("$line") ;;
+    esac
+  done
+
+  print -P "\n%B── gclean: ${n_active} active, ${#del} deleted, ${#arch} archived, ${#ren} renamed ──%b"
+  (( ${#noremote} + ${#foreign} + ${#errs} )) && \
+    print -P "   %F{8}skipped: ${#noremote} no-origin, ${#foreign} non-gitlab, ${#errs} api-error%f"
+
+  if (( ${#del} )); then
+    print -P "\n%F{red}%B🗑  deleted — project gone (${#del}):%b%f"
+    for line in "${del[@]}"; do
+      IFS=$'\037' read -r st work info rel <<< "$line"
+      sfx=''; [[ -n $work ]] && sfx=" %F{magenta}[$work]%f"
+      print -P "   %F{red}•%f ${rel}${sfx}"
+    done
+  fi
+  if (( ${#arch} )); then
+    print -P "\n%F{yellow}%B📦 archived (${#arch}):%b%f"
+    for line in "${arch[@]}"; do
+      IFS=$'\037' read -r st work info rel <<< "$line"
+      sfx=''; [[ -n $work ]] && sfx=" %F{magenta}[$work]%f"
+      print -P "   %F{yellow}•%f ${rel}${sfx}"
+    done
+  fi
+  if (( ${#ren} )); then
+    print -P "\n%F{cyan}%B↪ renamed/moved (${#ren}):%b%f"
+    for line in "${ren[@]}"; do IFS=$'\037' read -r st work info rel <<< "$line"
+      print -P "   %F{cyan}•%f $rel %F{8}→ ${info:-<new path unknown>}%f"; done
+  fi
+  if (( ${#errs} )); then
+    print -P "\n%F{8}%Bapi-errors (${#errs}) — not classified:%b%f"
+    for line in "${errs[@]}"; do IFS=$'\037' read -r st work info rel <<< "$line"
+      print -P "   %F{8}• $rel — ${info}%f"; done
+  fi
+
+  # ── actions ────────────────────────────────────────────────────────────────
+  (( ${#del} + ${#arch} + ${#ren} )) || return 0
+  if (( dry )); then print -P "\n%F{8}(dry-run — no changes made)%f"; return 0; fi
+  if [[ -z $GCLEAN_ASSUME_YES && ! -t 0 ]]; then
+    print -P "\n%F{8}(non-interactive — re-run in a terminal to act)%f"; return 0
+  fi
+  [[ -n $GCLEAN_ASSUME_YES ]] && { rm_all=1; ren_all=1 }
+
+  if (( ${#del} + ${#arch} )); then
+    print -P "\n%B🔥 Remove stale checkouts (rm -rf)?%b"
+    for rec in "${del[@]}" "${arch[@]}"; do
+      IFS=$'\037' read -r st work info rel <<< "$rec"; abs=$root/$rel
+      [[ $abs == $root/* && -d $abs ]] || { print -P "   %F{8}$rel — skipped (path guard)%f"; continue }
+      if [[ -n $work ]]; then            # local work → always confirm individually, default No
+        print -Pn "   %F{magenta}⚠ $rel has local work [$work]%f — rm -rf anyway? [y/N] "
+        read -r ans
+        [[ ${ans:l} == (y|yes) ]] || { print -P "   %F{8}$rel — kept%f"; continue }
+      elif (( ! rm_all )); then
+        print -Pn "   rm -rf %B$rel%b ($st)? [y/N/a/q] "; read -r ans
+        case ${ans:l} in a|all) rm_all=1 ;; q|quit) break ;; y|yes) ;; *) continue ;; esac
+      fi
+      if rm -rf -- "$abs"; then print -P "   %F{green}✅ removed $rel%f"
+      else print -P "   %F{red}❌ failed to remove $rel%f"; fi
+    done
+  fi
+
+  if (( ${#ren} )); then
+    print -P "\n%B🔗 Fix origin URL of renamed repos?%b"
+    for rec in "${ren[@]}"; do
+      IFS=$'\037' read -r st work info rel <<< "$rec"; abs=$root/$rel
+      [[ -z $info ]] && { print -P "   %F{8}$rel — new path unknown, skipped%f"; continue }
+      if (( ! ren_all )); then
+        print -Pn "   set origin of %B$rel%b → $info ? [y/N/a/q] "; read -r ans
+        case ${ans:l} in a|all) ren_all=1 ;; q|quit) break ;; y|yes) ;; *) continue ;; esac
+      fi
+      if git -C "$abs" remote set-url origin "$info"; then print -P "   %F{green}✅ $rel origin → $info%f"
+      else print -P "   %F{red}❌ $rel — failed to set origin%f"; fi
+    done
+  fi
+}
