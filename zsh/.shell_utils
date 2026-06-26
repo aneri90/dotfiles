@@ -53,6 +53,7 @@ _gpull_default_branch() {
 # node_modules/target are never walked. Concurrency via $GPULL_JOBS (default 8; set 1 for serial).
 gpull() {
   emulate -L zsh
+  unsetopt monitor notify   # quiet the "[N] pid" / "[N] done" job-control noise from the & jobs
   local repo tmp st name branch rel def ans
   local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i
   local -a repos oks fails skips warns off_repos off_branches
@@ -217,8 +218,9 @@ _gclean_one() {
 
 gclean() {
   emulate -L zsh
+  unsetopt monitor notify   # quiet the "[N] pid" / "[N] done" job-control noise from the & jobs
   local root=${GCLEAN_ROOT:-$HOME/gitlab-src}
-  local -i dry=0 running=0 batch=${GCLEAN_JOBS:-8} n_active=0 rm_all=0 ren_all=0
+  local -i dry=0 running=0 batch=${GCLEAN_JOBS:-8} n_active=0 rm_all=0 ren_all=0 done_n=0
   [[ $1 == -n || $1 == --dry-run || -n $GCLEAN_DRY_RUN ]] && dry=1
 
   [[ -d $root ]]            || { print -P "%F{red}gclean: $root not found.%f"; return 1 }
@@ -233,12 +235,17 @@ gclean() {
   (( ${#repos} )) || { print -P "%F{yellow}No git repositories under $root.%f"; return 0 }
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/gclean.XXXXXX") || return 1
-  print -P "%B🔎 Checking ${#repos} repos under ${root/#$HOME/~} against GitLab (up to ${batch} at a time)…%b"
+  print -P "%B🔎 Checking ${#repos} repos under ${root/#$HOME/~} against GitLab…%b"
   for repo in "${repos[@]}"; do
     _gclean_one "$repo" "$root" "$tmp" &
-    (( ++running >= batch )) && { wait; running=0 }
+    if (( ++running >= batch )); then
+      wait; running=0
+      done_n=$(wc -l < "$tmp")            # done_n is `local -i` → strips wc's whitespace
+      print -n "\r   checked ${done_n}/${#repos}…"
+    fi
   done
   wait
+  print "\r   checked ${#repos}/${#repos}.   "   # final overwrite + clear, then newline
 
   while IFS= read -r line; do recs+=("$line"); done < "$tmp"
   rm -f "$tmp"
