@@ -3,38 +3,33 @@
 # my custom code navigator keybinding
 bindkey -s ^f "cd \$(code-navigator)\n"
 
-# Private helper: fast-forward-pull one repo and record its result.
-# Output is captured and emitted as a single block so parallel jobs don't interleave mid-line.
+# Private helper: fast-forward-pull one repo and record its result line (state\tbranch\trel).
+# Records to the result file only (no stdout) so the parallel run can show a clean progress counter.
 _gpull_one() {
-  local repo=$1 resultfile=$2
-  local rel=${repo#./}; rel=${rel:-.}
-  local out state header branch   # note: 'status' is a read-only special param in zsh
+  local repo=$1 root=$2 resultfile=$3
+  local rel=${repo#$root/}; rel=${rel:-.}
+  local before after state branch   # note: 'status' is a read-only special param in zsh
 
   branch=$(git -C "$repo" symbolic-ref --short -q HEAD) || branch='(detached)'
 
   if ! git -C "$repo" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
     state=skip
-    header=$(print -P "%F{yellow}⏭  ${rel} — no upstream, skipped%f"); out=""
-  elif out=$(git -C "$repo" pull --ff-only --autostash 2>&1); then
-    if [[ -n $(git -C "$repo" ls-files --unmerged) ]]; then
-      # ff succeeded but --autostash couldn't reapply cleanly: pull exits 0, yet the
-      # tree is left conflicted (local changes are safe in the stash). Don't fake a ✅.
-      state=warn
-      header=$(print -P "%F{magenta}⚠️  ${rel} — pulled, but autostash left conflicts (changes safe in \`git stash\`)%f")
-    else
-      state=ok
-      header=$(print -P "%F{green}✅ ${rel}%f")
-    fi
   else
-    state=fail
-    header=$(print -P "%F{red}❌ ${rel} — pull failed%f")
+    before=$(git -C "$repo" rev-parse -q HEAD 2>/dev/null)
+    if git -C "$repo" pull --ff-only --autostash >/dev/null 2>&1; then
+      if [[ -n $(git -C "$repo" ls-files --unmerged) ]]; then
+        # ff succeeded but --autostash couldn't reapply cleanly: pull exits 0, yet the
+        # tree is left conflicted (local changes are safe in the stash). Don't fake a ✅.
+        state=warn
+      else
+        after=$(git -C "$repo" rev-parse -q HEAD 2>/dev/null)
+        [[ $before != $after ]] && state=updated || state=ok
+      fi
+    else
+      state=fail
+    fi
   fi
 
-  if [[ -n $out ]]; then
-    printf '%s\n%s\n\n' "$header" "$out"
-  else
-    printf '%s\n\n' "$header"
-  fi
   printf '%s\t%s\t%s\n' "$state" "$branch" "$rel" >> "$resultfile"
 }
 
@@ -48,39 +43,50 @@ _gpull_default_branch() {
   print -r -- "${def#origin/}"
 }
 
-# Fast-forward-pull every Git repo at or under the current directory, in parallel.
-# Treats each repo as a leaf (won't descend into a repo's working tree), so heavy dirs like
-# node_modules/target are never walked. Concurrency via $GPULL_JOBS (default 8; set 1 for serial).
+# Fast-forward-pull every Git repo at or under a directory, in parallel. With no argument the
+# root defaults to $HOME/gitlab-src (override with $GPULL_ROOT); pass a path to scan elsewhere
+# (`gpull .` for the old current-directory behavior). Treats each repo as a leaf (won't descend
+# into a repo's working tree), so heavy dirs like node_modules/target are never walked.
+# Concurrency via $GPULL_JOBS (default 8; set 1 for serial).
 gpull() {
   emulate -L zsh
   unsetopt monitor notify   # quiet the "[N] pid" / "[N] done" job-control noise from the & jobs
-  local repo tmp st name branch rel def ans
-  local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i
-  local -a repos oks fails skips warns off_repos off_branches
+  local root=${1:-${GPULL_ROOT:-$HOME/gitlab-src}}; root=${root%/}
+  local repo tmp st name branch rel abs def ans
+  local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i done_n=0
+  local -a repos oks updated fails skips warns off_repos off_branches
+
+  [[ -d $root ]] || { print -P "%F{red}gpull: $root not found.%f"; return 1 }
 
   # Leaf discovery: print a directory and stop descending as soon as it contains a .git
   # (dir OR file → covers normal repos, submodules and worktrees).
   while IFS= read -r -d $'\0' repo; do
     repos+=("$repo")
-  done < <(find . -type d -exec test -e '{}/.git' \; -prune -print0 2>/dev/null)
+  done < <(find "$root" -type d -exec test -e '{}/.git' \; -prune -print0 2>/dev/null)
 
-  (( ${#repos} )) || { print -P "%F{yellow}No git repositories found here.%f"; return 0 }
+  (( ${#repos} )) || { print -P "%F{yellow}No git repositories under ${root/#$HOME/~}.%f"; return 0 }
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/gpull.XXXXXX") || return 1   # template → works on GNU + BSD/macOS
-  print -P "%B🔄 Pulling ${#repos} repos (up to ${batch} at a time)…%b\n"
+  print -P "%B🔄 Pulling ${#repos} repos under ${root/#$HOME/~} (up to ${batch} at a time)…%b"
 
   for repo in "${repos[@]}"; do
-    _gpull_one "$repo" "$tmp" &
-    (( ++running >= batch )) && { wait; running=0 }
+    _gpull_one "$repo" "$root" "$tmp" &
+    if (( ++running >= batch )); then
+      wait; running=0
+      done_n=$(wc -l < "$tmp")            # done_n is `local -i` → strips wc's whitespace
+      print -n "\r   pulled ${done_n}/${#repos}…"
+    fi
   done
   wait
+  print "\r   pulled ${#repos}/${#repos}.   "   # final overwrite + clear, then newline
 
   while IFS=$'\t' read -r st branch name; do
     case $st in
-      ok)   oks+=("$name") ;;
-      warn) warns+=("$name") ;;
-      fail) fails+=("$name") ;;
-      skip) skips+=("$name") ;;
+      ok)      oks+=("$name") ;;
+      updated) updated+=("$name"); oks+=("$name") ;;   # updated also counts as a clean pull
+      warn)    warns+=("$name") ;;
+      fail)    fails+=("$name") ;;
+      skip)    skips+=("$name") ;;
     esac
     if [[ $branch != test && $branch != main ]]; then
       off_repos+=("$name"); off_branches+=("$branch")
@@ -88,8 +94,9 @@ gpull() {
   done < "$tmp"
   rm -f "$tmp"
 
-  print -P "%B── gpull: ${#oks} ok, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
-  (( ${#warns} )) && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
+  print -P "\n%B── gpull: ${#oks} ok, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
+  (( ${#updated} )) && print -P "   %F{green}updated:%f ${(j:, :)updated}"
+  (( ${#warns} ))   && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
 
   # List 1 — pull errors.
   if (( ${#fails} )); then
@@ -115,8 +122,8 @@ gpull() {
 
   print -P "\n%BSwitch off-branch repos to their GitLab default branch (then pull)?%b"
   for (( i = 1; i <= ${#off_repos}; i++ )); do
-    rel=${off_repos[i]}; branch=${off_branches[i]}
-    def=$(_gpull_default_branch "$rel")
+    rel=${off_repos[i]}; branch=${off_branches[i]}; abs=$root/$rel
+    def=$(_gpull_default_branch "$abs")
     if [[ -z $def ]]; then
       print -P "   %F{8}$rel — no origin/default, skipped%f"; continue
     fi
@@ -133,8 +140,8 @@ gpull() {
         *)      continue ;;
       esac
     fi
-    if git -C "$rel" checkout "$def" >/dev/null 2>&1; then
-      if git -C "$rel" pull --ff-only --autostash >/dev/null 2>&1; then
+    if git -C "$abs" checkout "$def" >/dev/null 2>&1; then
+      if git -C "$abs" pull --ff-only --autostash >/dev/null 2>&1; then
         print -P "   %F{green}✅ $rel → $def (pulled)%f"
       else
         print -P "   %F{yellow}⚠ $rel → $def (checked out; pull failed)%f"
