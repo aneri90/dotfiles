@@ -3,6 +3,28 @@
 # my custom code navigator keybinding
 bindkey -s ^f "cd \$(code-navigator)\n"
 
+# Force a SINGLE serial gitlab.com OAuth refresh before the parallel jobs below, so they
+# reuse the cached token instead of each invoking `glab auth git-credential` at once and
+# racing to refresh it. That race rotates the refresh token, so all but one refresh fails
+# and those git/glab calls fall back to git's `Username for 'https://gitlab.com'` prompt —
+# the flood seen on the first pull of the day. Returns 0 when usable creds are available,
+# 1 when a full `glab auth login` is needed (offered interactively). No-op without glab.
+_glab_ensure_auth() {
+  command -v glab >/dev/null || return 0
+  local ans
+  printf 'protocol=https\nhost=gitlab.com\n\n' | glab auth git-credential get >/dev/null 2>&1 && return 0
+  print -P "%F{red}%B🔐 GitLab token expired and can't be refreshed.%b%f"
+  if [[ ! -t 0 ]]; then
+    print -P "   %F{8}Run %Bglab auth login%b then retry.%f"; return 1
+  fi
+  print -Pn "   Run %Bglab auth login%b now? [y/N] "; read -r ans
+  [[ ${ans:l} == (y|yes) ]] || { print -P "   %F{8}aborted — run glab auth login then retry.%f"; return 1 }
+  if glab auth login && printf 'protocol=https\nhost=gitlab.com\n\n' | glab auth git-credential get >/dev/null 2>&1; then
+    print -P "   %F{green}✓ re-authenticated — continuing.%f"; return 0
+  fi
+  print -P "   %F{red}still not authenticated — aborting.%f"; return 1
+}
+
 # Private helper: fast-forward-pull one repo and record its result line (state\tbranch\trel).
 # Records to the result file only (no stdout) so the parallel run can show a clean progress counter.
 _gpull_one() {
@@ -16,7 +38,7 @@ _gpull_one() {
     state=skip
   else
     before=$(git -C "$repo" rev-parse -q HEAD 2>/dev/null)
-    if git -C "$repo" pull --ff-only --autostash >/dev/null 2>&1; then
+    if GIT_TERMINAL_PROMPT=0 git -C "$repo" pull --ff-only --autostash >/dev/null 2>&1; then
       if [[ -n $(git -C "$repo" ls-files --unmerged) ]]; then
         # ff succeeded but --autostash couldn't reapply cleanly: pull exits 0, yet the
         # tree is left conflicted (local changes are safe in the stash). Don't fake a ✅.
@@ -52,9 +74,9 @@ gpull() {
   emulate -L zsh
   unsetopt monitor notify   # quiet the "[N] pid" / "[N] done" job-control noise from the & jobs
   local root=${1:-${GPULL_ROOT:-$HOME/gitlab-src}}; root=${root%/}
-  local repo tmp st name branch rel abs def ans
-  local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i done_n=0
-  local -a repos oks updated fails skips warns off_repos off_branches
+  local repo tmp st name branch rel abs def ans upd_note
+  local -i running=0 batch=${GPULL_JOBS:-8} switch_all=0 i done_n=0 interrupted=0 header_shown=0
+  local -a repos oks updated fails skips warns off_repos off_branches pids
 
   [[ -d $root ]] || { print -P "%F{red}gpull: $root not found.%f"; return 1 }
 
@@ -66,18 +88,30 @@ gpull() {
 
   (( ${#repos} )) || { print -P "%F{yellow}No git repositories under ${root/#$HOME/~}.%f"; return 0 }
 
+  _glab_ensure_auth || return 1   # refresh the OAuth token once, serially, before going parallel
+
   tmp=$(mktemp "${TMPDIR:-/tmp}/gpull.XXXXXX") || return 1   # template → works on GNU + BSD/macOS
+  # Ctrl+C: kill the in-flight pulls (background & jobs ignore SIGINT, so they need an explicit
+  # kill), then the post-wait check below cleans up the temp file and bails. emulate -L zsh
+  # already makes this trap function-local (restored on return).
+  trap 'interrupted=1; (( ${#pids} )) && kill ${pids} 2>/dev/null' INT
   print -P "%B🔄 Pulling ${#repos} repos under ${root/#$HOME/~} (up to ${batch} at a time)…%b"
 
   for repo in "${repos[@]}"; do
     _gpull_one "$repo" "$root" "$tmp" &
+    pids+=($!)
     if (( ++running >= batch )); then
       wait; running=0
+      (( interrupted )) && break
       done_n=$(wc -l < "$tmp")            # done_n is `local -i` → strips wc's whitespace
       print -n "\r   pulled ${done_n}/${#repos}…"
     fi
   done
-  wait
+  (( interrupted )) || wait
+  if (( interrupted )); then
+    print -P "\n%F{yellow}⏹  gpull interrupted — $(wc -l < "$tmp" 2>/dev/null)/${#repos} done.%f"
+    rm -f "$tmp"; return 130
+  fi
   print "\r   pulled ${#repos}/${#repos}.   "   # final overwrite + clear, then newline
 
   while IFS=$'\t' read -r st branch name; do
@@ -94,9 +128,10 @@ gpull() {
   done < "$tmp"
   rm -f "$tmp"
 
-  print -P "\n%B── gpull: ${#oks} ok, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
-  (( ${#updated} )) && print -P "   %F{green}updated:%f ${(j:, :)updated}"
-  (( ${#warns} ))   && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
+  upd_note=''
+  (( ${#updated} )) && upd_note=" (${#updated} updated)"
+  print -P "\n%B── gpull: ${#oks} ok${upd_note}, ${#warns} warned, ${#skips} skipped, ${#fails} failed ──%b"
+  (( ${#warns} )) && print -P "   %F{magenta}warned:%f ${(j:, :)warns}"
 
   # List 1 — pull errors.
   if (( ${#fails} )); then
@@ -120,19 +155,20 @@ gpull() {
   fi
   [[ -n $GPULL_ASSUME_YES ]] && switch_all=1
 
-  print -P "\n%BSwitch off-branch repos to their GitLab default branch (then pull)?%b"
   for (( i = 1; i <= ${#off_repos}; i++ )); do
+    (( interrupted )) && { print -P "\n%F{yellow}⏹  gpull interrupted.%f"; return 130 }
     rel=${off_repos[i]}; branch=${off_branches[i]}; abs=$root/$rel
     def=$(_gpull_default_branch "$abs")
-    if [[ -z $def ]]; then
-      print -P "   %F{8}$rel — no origin/default, skipped%f"; continue
-    fi
-    if [[ $def == $branch ]]; then
-      print -P "   %F{8}$rel — already on default ($def), skipped%f"; continue
+    [[ -z $def ]]         && { print -P "   %F{8}$rel — no origin/default, skipped%f"; continue }
+    [[ $def == $branch ]] && continue                 # already on default → quietly skip
+    if (( ! header_shown )); then
+      print -P "\n%BSwitch off-branch repos to their GitLab default branch (then pull)?%b"
+      header_shown=1
     fi
     if (( ! switch_all )); then
       print -Pn "   Switch %B$rel%b ($branch → $def)? [y/N/a/q] "
       read -r ans
+      (( interrupted )) && { print -P "\n%F{yellow}⏹  gpull interrupted.%f"; return 130 }
       case ${ans:l} in
         a|all)  switch_all=1 ;;
         q|quit) break ;;
@@ -141,7 +177,7 @@ gpull() {
       esac
     fi
     if git -C "$abs" checkout "$def" >/dev/null 2>&1; then
-      if git -C "$abs" pull --ff-only --autostash >/dev/null 2>&1; then
+      if GIT_TERMINAL_PROMPT=0 git -C "$abs" pull --ff-only --autostash >/dev/null 2>&1; then
         print -P "   %F{green}✅ $rel → $def (pulled)%f"
       else
         print -P "   %F{yellow}⚠ $rel → $def (checked out; pull failed)%f"
@@ -227,7 +263,7 @@ gclean() {
   emulate -L zsh
   unsetopt monitor notify   # quiet the "[N] pid" / "[N] done" job-control noise from the & jobs
   local root=${GCLEAN_ROOT:-$HOME/gitlab-src}
-  local -i dry=0 running=0 batch=${GCLEAN_JOBS:-8} n_active=0 rm_all=0 ren_all=0 done_n=0
+  local -i dry=0 running=0 batch=${GCLEAN_JOBS:-8} n_active=0 rm_all=0 ren_all=0 done_n=0 interrupted=0
   [[ $1 == -n || $1 == --dry-run || -n $GCLEAN_DRY_RUN ]] && dry=1
 
   [[ -d $root ]]            || { print -P "%F{red}gclean: $root not found.%f"; return 1 }
@@ -235,23 +271,33 @@ gclean() {
   command -v jq   >/dev/null || { print -P "%F{red}gclean: jq not found.%f"; return 1 }
 
   local repo tmp line st work info rel rec abs ans sfx
-  local -a repos recs arch del ren errs foreign noremote
+  local -a repos recs arch del ren errs foreign noremote pids
 
   while IFS= read -r -d $'\0' repo; do repos+=("$repo"); done \
     < <(find "$root" -type d -exec test -e '{}/.git' \; -prune -print0 2>/dev/null)
   (( ${#repos} )) || { print -P "%F{yellow}No git repositories under $root.%f"; return 0 }
 
+  _glab_ensure_auth || return 1   # refresh the OAuth token once before the parallel glab api calls
+
   tmp=$(mktemp "${TMPDIR:-/tmp}/gclean.XXXXXX") || return 1
+  # Ctrl+C: kill the in-flight checks (background & jobs ignore SIGINT), then bail below.
+  trap 'interrupted=1; (( ${#pids} )) && kill ${pids} 2>/dev/null' INT
   print -P "%B🔎 Checking ${#repos} repos under ${root/#$HOME/~} against GitLab…%b"
   for repo in "${repos[@]}"; do
     _gclean_one "$repo" "$root" "$tmp" &
+    pids+=($!)
     if (( ++running >= batch )); then
       wait; running=0
+      (( interrupted )) && break
       done_n=$(wc -l < "$tmp")            # done_n is `local -i` → strips wc's whitespace
       print -n "\r   checked ${done_n}/${#repos}…"
     fi
   done
-  wait
+  (( interrupted )) || wait
+  if (( interrupted )); then
+    print -P "\n%F{yellow}⏹  gclean interrupted — $(wc -l < "$tmp" 2>/dev/null)/${#repos} checked.%f"
+    rm -f "$tmp"; return 130
+  fi
   print "\r   checked ${#repos}/${#repos}.   "   # final overwrite + clear, then newline
 
   while IFS= read -r line; do recs+=("$line"); done < "$tmp"
@@ -317,9 +363,11 @@ gclean() {
       if [[ -n $work ]]; then            # local work → always confirm individually, default No
         print -Pn "   %F{magenta}⚠ $rel has local work [$work]%f — rm -rf anyway? [y/N] "
         read -r ans
+        (( interrupted )) && { print -P "\n%F{yellow}⏹  gclean interrupted.%f"; return 130 }
         [[ ${ans:l} == (y|yes) ]] || { print -P "   %F{8}$rel — kept%f"; continue }
       elif (( ! rm_all )); then
         print -Pn "   rm -rf %B$rel%b ($st)? [y/N/a/q] "; read -r ans
+        (( interrupted )) && { print -P "\n%F{yellow}⏹  gclean interrupted.%f"; return 130 }
         case ${ans:l} in a|all) rm_all=1 ;; q|quit) break ;; y|yes) ;; *) continue ;; esac
       fi
       if rm -rf -- "$abs"; then print -P "   %F{green}✅ removed $rel%f"
@@ -334,6 +382,7 @@ gclean() {
       [[ -z $info ]] && { print -P "   %F{8}$rel — new path unknown, skipped%f"; continue }
       if (( ! ren_all )); then
         print -Pn "   set origin of %B$rel%b → $info ? [y/N/a/q] "; read -r ans
+        (( interrupted )) && { print -P "\n%F{yellow}⏹  gclean interrupted.%f"; return 130 }
         case ${ans:l} in a|all) ren_all=1 ;; q|quit) break ;; y|yes) ;; *) continue ;; esac
       fi
       if git -C "$abs" remote set-url origin "$info"; then print -P "   %F{green}✅ $rel origin → $info%f"
