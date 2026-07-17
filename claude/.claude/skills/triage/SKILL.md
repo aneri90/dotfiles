@@ -1,9 +1,9 @@
 ---
 name: triage
-description: Triage a production alert for Sisred, Aipen, Aicore, or Perfetto. Auto-detects the product AND environment from the pasted alert, pulls logs/traces from that product's Grafana and read-only state from its k8s cluster, and produces a root-cause analysis in chat. Use when the user pastes an alert (usually from Google Workspace) or asks to investigate a sisred/aipen/aicore/perfetto incident.
+description: Triage a production alert for Sisred, Aipen, Aicore, Perfetto, or Mindy. Auto-detects the product AND environment from the pasted alert, pulls logs/traces from that product's Grafana and read-only state from its k8s cluster, and produces a root-cause analysis in chat. Use when the user pastes an alert (usually from Google Workspace) or asks to investigate a sisred/aipen/aicore/perfetto/mindy incident, or to check a product's Grafana Cloud logs free-tier usage (§8).
 ---
 
-# Alert triage — Sisred / Aipen / Aicore / Perfetto
+# Alert triage — Sisred / Aipen / Aicore / Perfetto / Mindy
 
 The user pastes an alert (usually copied from Google Workspace). The alert is
 self-describing: its `Service` / `Environment` / URL fields tell you **which product** and
@@ -18,6 +18,8 @@ a cluster, never run `terraform`, never commit.
   - `aipen-*`, `aipen.maggiolicloud.it`, `aipen-prod` → **aipen**
   - `aicore-*`, `aicore-prod`, `aicore-chat` → **aicore** (co-located in the aipen cluster — see §2)
   - `perfetto-*` → **perfetto**
+  - `mindy-*` (`mindy-webapp`, `mindy-webapp-helm`, `mindy-core`), `mindy-test`/`mindy-prod`
+    → **mindy** (two apps in one namespace — see §2)
 
   If the alert mentions two products (a cross-service error, e.g. *sisred-indexer* getting a
   403 from *aipen*), the product is the one in the `Service` field — i.e. the service that
@@ -33,7 +35,7 @@ querying — easy for the user to spot a misdetect.
 
 Select the block for the detected product. `{ENV}` is the environment from §1.
 `LOKI_DATASOURCE_UID` / `TEMPO_DATASOURCE_UID` are the standard Grafana Cloud UIDs for all
-four (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
+five (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
 
 - `LOKI_DATASOURCE_UID=grafanacloud-logs`
 - `TEMPO_DATASOURCE_UID=grafanacloud-traces`
@@ -70,6 +72,21 @@ dev/test/main; `values/<env>/aicore.yaml`; per-service resources under `services
 - `GRAFANA_URL=https://perfettomonitoring.grafana.net`
 - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_PERFETTO`
 
+### mindy  (envs: test, prod)
+Two apps share one namespace: the **`mindy-webapp`** Node frontend (pino JSON logs, `level:error`)
+and the **`mindy-core`** Spring backend (logback JSON, logger `it.maggioli.mindy…`, `traceId`/
+`spanId`). The "Log Errors Detected" alert fires on a **frontend ERROR**, but that ERROR is often
+just a non-2xx relayed from the backend — always follow the `traceId` into `mindy-core` for the
+real cause (§4/§5).
+- `K8S_CONTEXT` — explicit map (the GCP **project** segment changes per env, like perfetto; don't
+  substitute `{ENV}` blindly):
+  - `test` → `gke_mindy-dev-420509_europe-west1_mindy-test-k8s`
+  - `prod` → `gke_mindy-prod_europe-west8_mindy-prod-k8s`
+- `K8S_NAMESPACE=mindy-{ENV}`
+- `SERVICE` (app label): `mindy-webapp` (frontend, emits the alert) or `mindy-core` (backend)
+- `GRAFANA_URL=https://mindymonitoring.grafana.net`   (standalone stack — not shared)
+- `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_MINDY`
+
 ## 3. Sanity + resolve the target
 
 1. Token: `[ -n "${!GRAFANA_TOKEN_ENV}" ] || echo MISSING`. If missing, stop and tell the
@@ -83,12 +100,12 @@ dev/test/main; `values/<env>/aicore.yaml`; per-service resources under `services
    K8S_CONTEXT="${K8S_CONTEXT//\{ENV\}/$ENV}"       # sisred-{ENV}-k8s -> sisred-prod-k8s
    ```
 
-   For perfetto, take `K8S_CONTEXT` from the map rather than substituting.
+   For perfetto and mindy, take `K8S_CONTEXT` from the map rather than substituting.
 3. Verify the context exists (read-only); never silently fall back to the current context:
 
    ```bash
    kubectl config get-contexts -o name | grep -Fxq "$K8S_CONTEXT" \
-     || kubectl config get-contexts -o name | grep -iE 'sisred|aipen|perfetto'
+     || kubectl config get-contexts -o name | grep -iE 'sisred|aipen|perfetto|mindy'
    ```
 
    If absent, pick the matching one from that list or ask the user.
@@ -164,6 +181,26 @@ environment** (a `sisred-prod` alert → investigate aipen in **prod**), and rep
 
 Keep evidence to the 3–6 log lines that support the conclusion; link the time range + pod
 names rather than dumping full log pages.
+
+## 8. Logs free-tier usage (read-only)
+
+All five products run on Grafana Cloud **Free Tier: 50 GB logs/month**, cycle resets on the
+1st. Usage lives in the built-in `grafanacloud-usage` datasource (same `$TOKEN`), independent
+of `$K8S_NAMESPACE`:
+
+```bash
+curl -sG -H "Authorization: Bearer $TOKEN" \
+  "$GRAFANA_URL/api/datasources/proxy/uid/grafanacloud-usage/api/v1/query" \
+  --data-urlencode 'query=grafanacloud_org_logs_usage / grafanacloud_org_logs_included_usage' \
+  | jq -r '.data.result[0].value[1]'   # fraction of the 50 GB cap used this cycle
+```
+
+`grafanacloud_org_logs_usage` is GB used month-to-date; `_included_usage` is 50. The aipen
+stack is shared by aipen **and** aicore, so its number is their **combined** total; the mindy
+stack is standalone. Grafana
+drops logs once the cap is exceeded. To attribute volume, find top talkers with
+`sum by (pod) (bytes_over_time({namespace="<ns>"}[6h]))` on `grafanacloud-logs`. A `logs-usage`
+alert (warn 80% / crit 100%) is provisioned per org in each `*-iac/infra/alerting/`.
 
 ## Guardrails
 
