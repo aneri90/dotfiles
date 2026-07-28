@@ -3,4 +3,5 @@
 --ignore=DS_Store
 --ignore=README.md
 --ignore=install.sh
+--ignore=Brewfile
 --no-folding
