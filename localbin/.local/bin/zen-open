@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Open URLs from WSL in Zen Browser on the Windows side.
+#
+# Used via $BROWSER, which tools like gh and Python's webbrowser module (gcloud,
+# az) read directly. It names zen.exe explicitly instead of deferring to the
+# Windows default handler, because that association is ambiguous here: UserChoice
+# for http/https reads MSEdgeHTM even though ShellExecute lands in Zen.
+#
+# It also removes the Chromium fallback. Without $BROWSER, Python's browser order
+# is xdg-open -> gio -> chromium, and Chromium plus WSLg are both available here,
+# so a failing xdg-open would silently open a throwaway Linux browser with none
+# of the real session.
+#
+# Note xdg-open itself does not consult $BROWSER under WSL: it detects DE=wsl and
+# calls rundll32.exe url.dll,FileProtocolHandler, reaching Zen via the Windows
+# association. This wrapper is the one-hop, deterministic path.
+
+set -euo pipefail
+
+ZEN="/mnt/c/Program Files/Zen Browser/zen.exe"
+
+if [[ ! -x "$ZEN" ]]; then
+    echo "zen-open: Zen Browser not found at $ZEN" >&2
+    exit 1
+fi
+
+exec "$ZEN" "$@"
