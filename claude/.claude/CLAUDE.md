@@ -11,6 +11,14 @@
 - Google Cloud (`gcloud`) and Azure (`az` CLI) are the cloud providers.
 - Terraform is the IaC tool, managed via GitLab CI/CD pipelines to propagate infrastructure changes. Never run `terraform plan` or `terraform apply` locally — let the pipeline handle it.
 
+## Code style
+
+- Comment sparingly — match the surrounding file's existing comment density.
+- Comment the *why* (constraint, workaround, gotcha), never the *what*. No comments that restate the code.
+- No banner/separator comments, no ASCII dividers, no all-caps emphasis (`IMPORTANT:`, `CRITICAL:`, `NOTE:`) unless a real footgun warrants it.
+- No comments narrating the edit ("added X", "changed Y", "now handles Z") — that belongs in the commit message.
+- Docstrings/doc-comments only where the file or language convention already uses them.
+
 ## Git workflow
 
 - Pull incoming changes before starting work.
