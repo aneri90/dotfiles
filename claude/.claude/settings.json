@@ -21,7 +21,6 @@
     }
   },
   "effortLevel": "xhigh",
-  "outputStyle": "simple-english",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true
