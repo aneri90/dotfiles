@@ -4,7 +4,8 @@
 
 - All company repos live in `~/gitlab-src/**`, hosted on GitLab Ultimate SaaS (gitlab.com).
 - Microservices and services use trunk-based development: `main` is the trunk, work happens on feature branches merged via MRs.
-- Some IaC repos instead use one branch per environment (e.g. `test`/`main`).
+- Some IaC repos instead use one branch per environment (e.g. `test`/`main`). Those repos are named after this convention `<applicazion>-iac` and `<applicazion>-deploy`.
+- `<applicazion>-iac` and `<applicazion>-deploy` usually have test as default branch and keep their environment updated by branch promotion. Test and prod values coexists in the same branch. When merging test/main branches the relative environment values get selected by the CICD.
 
 ## Cloud & IaC
 
@@ -13,11 +14,10 @@
 
 ## Code style
 
-- Comment sparingly — match the surrounding file's existing comment density.
 - Comment the *why* (constraint, workaround, gotcha), never the *what*. No comments that restate the code.
 - No banner/separator comments, no ASCII dividers, no all-caps emphasis (`IMPORTANT:`, `CRITICAL:`, `NOTE:`) unless a real footgun warrants it.
 - No comments narrating the edit ("added X", "changed Y", "now handles Z") — that belongs in the commit message.
-- Docstrings/doc-comments only where the file or language convention already uses them.
+- No comments referencing epics / phases / sprint. Document the intent of the code if its necessary.
 
 ## Git workflow
 
@@ -26,6 +26,14 @@
 - Do not add Co-authored-by trailers.
 - Do not add Generated with Claude Code (or similar) to any commit / issue / merge requests
 - Do not edit `CHANGELOG.md` or bump version numbers manually — both are produced automatically by CI/CD on merge to `main`.
+
+## Release and dependencies updates
+
+- Both company internal and external dependencies are handled by RenovateBot
+- When we commit on default branch ( main ) the CICD evaluate via semantic release if the commit message should trigger a release version ( via semantic commit convention )
+- When a downstream project depends on a released repo -> the CICD are configured for triggering Renovate to automatically update via MR
+- Renovatebot will automatically create MR for minor and patch versions. Major version are configured to be manually approved by user in a Dependency Dashboard issue.
+
 
 ## Working in git worktrees
 
