@@ -20,6 +20,7 @@
     }
   },
   "effortLevel": "xhigh",
+  "outputStyle": "Concise",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "editorMode": "normal",
