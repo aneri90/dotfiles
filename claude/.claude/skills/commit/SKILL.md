@@ -44,7 +44,6 @@ Create a well-formed git commit for the current logical unit of work.
    then bullets) only when the *why* isn't obvious from the subject.
    Example: `fix(appointments): 🐛 calculate duration from the selected service`.
 6. **Guardrails.**
-   - NEVER add `Co-authored-by` lines or any "Generated with Claude Code" / AI attribution.
    - Do NOT edit `CHANGELOG.md` or bump version numbers — CI/CD generates both on merge to `main`.
    - Do NOT commit secrets, credentials, or large build artifacts — flag them instead.
    - Do NOT use `--no-verify`; respect pre-commit hooks.
