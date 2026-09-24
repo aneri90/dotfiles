@@ -25,5 +25,9 @@
   "skipDangerousModePermissionPrompt": true,
   "editorMode": "normal",
   "remoteControlAtStartup": true,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
 }

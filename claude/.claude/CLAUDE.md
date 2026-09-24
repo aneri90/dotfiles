@@ -23,8 +23,7 @@
 
 - Pull incoming changes before starting work.
 - Use conventional commits (semantic versioning).
-- Do not add Co-authored-by trailers.
-- Do not add Generated with Claude Code (or similar) to any commit / issue / merge requests
+- Do not add Generated with Claude Code (or similar) to issues or comments
 - Do not edit `CHANGELOG.md` or bump version numbers manually — both are produced automatically by CI/CD on merge to `main`.
 
 ## Release and dependencies updates
