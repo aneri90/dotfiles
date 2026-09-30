@@ -118,6 +118,15 @@ and start the app with a non-test profile against local services. Every startup 
 there is a preliminary refactor candidate. Fix it in the worktree, restart, and repeat until
 the app starts. Record each fix for the plan, then remove the worktree.
 
+For Spring Boot, also check configuration keys:
+- Add `spring-boot-properties-migrator` (runtime scope, under `<dependencies>`, not
+  `<dependencyManagement>`) for the prototype run only. Its `PropertiesMigrationListener`
+  log line lists renamed and removed keys, but only for the active profile.
+- Cover the other profiles statically. Collect the deprecated entries from every
+  `META-INF/spring-configuration-metadata.json` on the classpath
+  (`mvn dependency:build-classpath`). Match them against the flattened keys of every
+  `application*.yml` and helm values file.
+
 When you stop the app, find its PID in a separate command. Your own shell's command line
 contains the search pattern, so `pkill -f` or `pgrep -f` in the same command can kill that shell.
 
