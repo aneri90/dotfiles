@@ -105,6 +105,22 @@ claims from agents by reading the code yourself before putting them in the plan.
 Compile with deprecation warnings on the current version (`-Xlint:deprecation`,
 `tsc --noEmit`, …) when a jump removes previously deprecated APIs.
 
+Before a config- or behavior-based finding goes into the plan, check that the setting is
+actually in effect. An explicit `@Enable…` annotation or a user-defined bean often makes the
+framework's auto-configuration back off, so its properties do nothing. Read the
+auto-configuration's conditions in the target version's sources, and check the startup log.
+
+## 6b. Prototype on the target version
+
+Release notes miss things (e.g. a stricter config binder). In a throwaway worktree
+(`git worktree add --detach <scratch>/wt-target <branch>`), apply only the version bumps
+and start the app with a non-test profile against local services. Every startup failure
+there is a preliminary refactor candidate. Fix it in the worktree, restart, and repeat until
+the app starts. Record each fix for the plan, then remove the worktree.
+
+When you stop the app, find its PID in a separate command. Your own shell's command line
+contains the search pattern, so `pkill -f` or `pgrep -f` in the same command can kill that shell.
+
 ## 7. Plan — then stop
 
 Write the plan (plan file if in plan mode, otherwise in chat):
