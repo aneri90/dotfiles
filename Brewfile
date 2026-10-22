@@ -54,6 +54,9 @@ brew "kubeconform"
 brew "azure-cli"
 cask "gcloud-cli"
 
+# --- AI coding agents ---
+cask "antigravity-cli"
+
 # --- general CLI utilities used across the skills ---
 brew "jq"
 brew "yamllint"
