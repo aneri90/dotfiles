@@ -16,7 +16,7 @@ a cluster, never run `terraform`, never commit.
 - **Product** — from the `Service` name prefix, hostnames, or the `Environment`/namespace:
   - `sisred-*`, `sisred-prod`, `sisred-test` → **sisred**
   - `aipen-*`, `aipen.maggiolicloud.it`, `aipen-prod` → **aipen**
-  - `aicore-*`, `aicore-prod`, `aicore-chat` → **aicore** (co-located in the aipen cluster — see §2)
+  - `aicore-*`, `aicore-prod`, `aicore-chat` → **aicore** (test runs on its own GKE cluster, prod/dev still in the aipen cluster — see §2)
   - `perfetto-*` → **perfetto**
   - `mindy-*` (`mindy-webapp`, `mindy-webapp-helm`, `mindy-core`), `mindy-test`/`mindy-prod`
     → **mindy** (two apps in one namespace — see §2)
@@ -53,14 +53,28 @@ five (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
 - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
 
 ### aicore  (envs: dev, test, prod)
-aicore is **co-deployed inside the aipen cluster** (same AKS cluster + Grafana as aipen); it
-reuses aipen's context/Grafana and only the namespace differs:
-- `K8S_CONTEXT=aipen-{ENV}-k8s`
-- `K8S_NAMESPACE=aicore-{ENV}`
-- `GRAFANA_URL=https://aipenmonitoring.grafana.net`
-- `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
+Since 2026-10-23 **test** runs on its own GKE cluster with its own Grafana stack; **prod and dev**
+are still co-deployed inside the aipen AKS cluster and Grafana until their cutover (aicore-chart#35).
+An alert from the new stack carries `cluster="aicore-test-gke"`.
 
-Deploy source of truth: repo `aipen/infra/aipen-deploy` (helmfile, branch-per-env
+- `test`:
+  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west8_aicore-test-gke`
+  - `K8S_NAMESPACE=aicore-test`
+  - `GRAFANA_URL=https://whitecrow1342.grafana.net`
+  - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AICORE`
+  - Deploy source of truth: `ai-core-2/infra/aicore-deploy` (branch `test`), alert rules in
+    `ai-core-2/infra/aicore-iac/infra/alerting`.
+  - The free stack sleeps when idle: the first API call can answer `{"code":"Loading"}`;
+    retry every 10 s until it returns JSON data.
+  - The AKS namespace `aicore-test` may still exist as a rollback target with every key disabled;
+    it gets no traffic, so don't triage from it.
+- `prod`, `dev` (same context/Grafana as aipen, only the namespace differs):
+  - `K8S_CONTEXT=aipen-{ENV}-k8s`
+  - `K8S_NAMESPACE=aicore-{ENV}`
+  - `GRAFANA_URL=https://aipenmonitoring.grafana.net`
+  - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
+
+Deploy source of truth for prod/dev: repo `aipen/infra/aipen-deploy` (helmfile, branch-per-env
 dev/test/main; `values/<env>/aicore.yaml`; per-service resources under `services.<name>.resources`).
 
 ### perfetto  (envs: test, prod)
@@ -91,8 +105,9 @@ real cause (§4/§5).
 
 1. Token: `[ -n "${!GRAFANA_TOKEN_ENV}" ] || echo MISSING`. If missing, stop and tell the
    user to `export ${GRAFANA_TOKEN_ENV}=...` (read-only token). Set `TOKEN="${!GRAFANA_TOKEN_ENV}"`.
-2. Substitute the environment into the namespace/context (Grafana URL/token/datasources do
-   **not** change per env — one product-Grafana holds every env, keyed by the `namespace` label):
+2. Substitute the environment into the namespace/context. Grafana URL/token/datasources do
+   **not** change per env — one product-Grafana holds every env, keyed by the `namespace` label.
+   The exception is aicore test, which has its own context and Grafana (§2):
 
    ```bash
    ENV="prod"                                      # from §1, else test
@@ -100,7 +115,7 @@ real cause (§4/§5).
    K8S_CONTEXT="${K8S_CONTEXT//\{ENV\}/$ENV}"       # sisred-{ENV}-k8s -> sisred-prod-k8s
    ```
 
-   For perfetto and mindy, take `K8S_CONTEXT` from the map rather than substituting.
+   For perfetto, mindy and aicore test, take `K8S_CONTEXT` from §2 rather than substituting.
 3. Verify the context exists (read-only); never silently fall back to the current context:
 
    ```bash
@@ -196,8 +211,8 @@ curl -sG -H "Authorization: Bearer $TOKEN" \
 ```
 
 `grafanacloud_org_logs_usage` is GB used month-to-date; `_included_usage` is 50. The aipen
-stack is shared by aipen **and** aicore, so its number is their **combined** total; the mindy
-stack is standalone. Grafana
+stack is shared by aipen **and** aicore prod/dev, so its number is their **combined** total; the
+mindy stack and the aicore test stack (`whitecrow1342`) are standalone. Grafana
 drops logs once the cap is exceeded. To attribute volume, find top talkers with
 `sum by (pod) (bytes_over_time({namespace="<ns>"}[6h]))` on `grafanacloud-logs`. A `logs-usage`
 alert (warn 80% / crit 100%) is provisioned per org in each `*-iac/infra/alerting/`.
