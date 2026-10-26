@@ -16,6 +16,9 @@ export PATH=~/.npm-global/bin:$PATH
 # pgdump in Path without postgres (brew install libpq)
 export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
 
+# Parallel bottle downloads saturate the office link and cut off browsing
+export HOMEBREW_DOWNLOAD_CONCURRENCY=1
+
 # SDKMAN configuration
 export SDKMAN_DIR="$HOME/.sdkman"
 
