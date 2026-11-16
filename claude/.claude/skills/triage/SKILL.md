@@ -58,7 +58,7 @@ are still co-deployed inside the aipen AKS cluster and Grafana until their cutov
 An alert from the new stack carries `cluster="aicore-test-gke"`.
 
 - `test`:
-  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west8_aicore-test-gke`
+  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west1_aicore-test-gke`
   - `K8S_NAMESPACE=aicore-test`
   - `GRAFANA_URL=https://whitecrow1342.grafana.net`
   - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AICORE`
