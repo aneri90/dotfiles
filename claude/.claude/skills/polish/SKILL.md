@@ -1,53 +1,31 @@
 ---
-name: simplify
-description: Use this skill automatically when you feel your code is ready for human review, and whenever writing or reviewing code comments. Ready means the code works and achieves a stated goal, verified by your own tests and/or, if you deem it necessary, human testing.
+name: polish
+description: Run once on the branch diff right before committing code, to tighten names, comments and small structure. Skip docs-only, tests-only and config-only changes, and diffs under ~20 changed lines.
 ---
-Review changes in the current branch, or in the scope the user specifies. Apply these criteria without changing behavior. Only touch code in that scope, and run the relevant existing checks after changes.
 
-## Word choice in code and comments
+Polish only what this branch changed. Never touch code outside the diff, and never change behavior.
 
-Variable names, function names, and comments are all prose. Apply Orwell's rules ("Politics and the English Language") to each:
+1. Get the scope: `git diff $(git merge-base HEAD origin/HEAD 2>/dev/null || git merge-base HEAD origin/main)` plus staged and unstaged changes. If the diff is docs, tests or config only, or under ~20 changed lines, stop and say so.
+2. Check the changed lines against the rules below and the "Code style" section of the global CLAUDE.md (comments: why, never what; no narration, no banners).
+3. Apply at most ~10 edits. List anything larger (a split, a merge of modules) as a finding instead of doing it.
+4. Run the checks the repo already has for the touched files (tests, linter, type checker).
+5. Report: the edits made, the findings left, and the check results.
 
-> Never use a long word where a short one will do.
-> 
-> If it is possible to cut a word out, always cut it out.
-> 
-> Never use the passive where you can use the active.
-> 
-> Never use a foreign phrase, a scientific word, or a jargon word if you can think of an everyday English equivalent.
+## Names
 
-Latinate vocabulary (reconcile, coalesce, normalize, reconciliation) sounds technical and abstract; Anglo-Saxon words (prune, run, watch, stop, drop, walk) are short and physical. Prefer the Saxon word.
+- One word per concept, one concept per word. If `sync` already means "pull remote changes", it cannot also mean "flush to disk".
+- Cut words the context already carries: in `workspaceWatcher`, `watchWorkspace` beats `startNativeWorkspaceWatcher`.
+- A long compound name is usually a hedge: `baseline`, not `lastObservedDiskContent`.
+- Prefer short, plain words to Latinate jargon: `prune`, `drop`, `watch` over `reconcile`, `coalesce`, `normalize`.
 
-### Names
+## Structure (small moves only)
 
-1. **One word per concept, one concept per word.** Keep a vocabulary. If `sync` names "pulling remote changes," it cannot also name "flushing edits to disk;" rename one of them.
-2. **Cut words the context already carries.** A module named `workspaceWatcher` does not need `startNativeWorkspaceWatcher`; `watchWorkspace` says the same thing.
-3. **A compound name is usually a hedge:**
-
-- ❌ `lastObservedDiskContent` is a specification to defend
-- ✅ `baseline` is a readable description
-
-### Comments
-
-State, in plain English, the constraint the code cannot show: why the **non-obvious** exists.
-
-- ✅ If code is complex and the implementation is non-obvious, add a comment.
-- ✅ If a function contains complex behaviors or side effects, add a doc comment.
-- 🗑️ If a comment narrates change history from the conversation, delete it.
-- 🗑️ If a comment restates code whose behavior is self-evident, delete it.
-
-## Code structure
-
-1. **Inverted pyramid.** Within a file, lead with the exported or significant functions and push helpers below them. Don't bury the lead.
-2. **Related concepts over monoliths.** Break a large file into modules that each own one concept.
-3. **Combine overlapping concepts.** If two types, functions, or constants overlap significantly, merge them. The fewer distinct concepts a reader must hold in their head, the better.
-4. **Use shared code.** Common utilities (ex. file path parsing) may exist in the codebase already. Check for library or utility functions before inlining.
-5. **Derivability.** If a value can be computed from values already in scope, don't pass or store it separately. Removing derivable state often simplifies signatures, types, and control flow in one move. Example: an `isDirty` parameter that is always `editorContent !== baseline` can be dropped.
+- Lead with the exported or important functions; helpers go below.
+- Use the codebase's existing helpers instead of inlining a new one.
+- Drop derived state: a value computable from what is in scope is not passed or stored (an `isDirty` that always equals `content !== baseline` goes).
+- Merge two types, functions or constants that overlap almost completely.
 
 ## Overfitting
 
-Code must stand on its own. If a change only makes sense to someone who watched it happen (this conversation, this PR), it is overfitted. Write for the reader who arrives with no history.
-
-- If a name or comment needs the conversation to be understood, rewrite it against the codebase's own vocabulary.
-- **No backwards compatibility with unshipped code.** Supporting an old signature, alias, or data shape that only existed earlier in the same branch is compatibility with something that was never deployed. Delete the old path and update its callers.
-
+- A name or comment that only makes sense to someone who watched this session gets rewritten in the codebase's own words.
+- No backwards compatibility with code that never shipped: delete the old signature, alias or shape from earlier in the same branch and update its callers.
