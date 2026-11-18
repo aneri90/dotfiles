@@ -26,3 +26,14 @@ export NVM_DIR="$HOME/.nvm"
 if [ -n "${WSL_DISTRO_NAME:-}" ]; then
     export BROWSER="$HOME/.local/bin/zen-open"
 fi
+
+# Claude Code runs its Bash tool in $SHELL (zsh) unless told otherwise, and the
+# model writes bash. macOS /bin/bash is 3.2, which Claude Code refuses for
+# non-trivial commands, so only bash >= 5 qualifies.
+for _b in /opt/homebrew/bin/bash /usr/local/bin/bash /usr/bin/bash /bin/bash; do
+    if [ -x "$_b" ] && "$_b" -c '[ "${BASH_VERSINFO[0]}" -ge 5 ]' 2>/dev/null; then
+        export CLAUDE_CODE_SHELL="$_b"
+        break
+    fi
+done
+unset _b

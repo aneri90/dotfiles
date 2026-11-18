@@ -41,3 +41,8 @@
 - In a worktree, treat the worktree root as the base for ALL file operations. Get it with `git rev-parse --show-toplevel` — do not trust the env "Primary working directory".
 - Build every absolute `Edit`/`Write` path from that worktree root. Never reuse a main-repo absolute path. If you `Read` a file at a main-repo path earlier, re-resolve it under the worktree root before editing.
 - Run `pwd` before the first edit to confirm you are in the worktree, and keep the main repo's working tree clean.
+
+## Shell
+
+- The Bash tool runs bash 5 (`CLAUDE_CODE_SHELL`). If `echo $BASH_VERSION` prints nothing, the session fell back to zsh: quote globs, pipe JSON with `printf '%s'` (not `echo`), write `${TAG}:path`, and never name a variable `path` or `status`.
+- Never print environments or files that may hold secrets (`env`, `printenv`, `cat ~/.zshenv`, a pod's env). List names only: `env | cut -d= -f1`.

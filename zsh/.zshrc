@@ -83,3 +83,8 @@ zstyle ':completion:*:cd:*' tag-order local-directories directory-stack path-dir
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 
 KEYTIMEOUT=1
+
+# Fallback when a Claude Code session did not inherit CLAUDE_CODE_SHELL and its
+# Bash tool runs zsh: the snapshot shell is non-interactive and captures these.
+# Keep last: the plugins above are not written for SH_WORD_SPLIT.
+[[ -n $CLAUDECODE && ! -o interactive ]] && setopt NO_NOMATCH SH_WORD_SPLIT BSD_ECHO

@@ -11,6 +11,7 @@ tap "hashicorp/tap"
 tap "nikitabobko/tap"
 
 # --- bootstrap: dotfile management itself ---
+brew "bash"
 brew "stow"
 
 # --- shell (zsh/, starship/) ---
