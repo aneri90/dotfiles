@@ -32,6 +32,7 @@
 - When we commit on default branch ( main ) the CICD evaluate via semantic release if the commit message should trigger a release version ( via semantic commit convention )
 - When a downstream project depends on a released repo -> the CICD are configured for triggering Renovate to automatically update via MR
 - Renovatebot will automatically create MR for minor and patch versions. Major version are configured to be manually approved by user in a Dependency Dashboard issue.
+- So never wait for Renovate to carry a major. Once we've agreed to ship a breaking change, bump each consumer by hand, as soon as the release tag exists. That covers the deploy repos (`glflow deploy-bump`) and any downstream service or library. First check whether Renovate already merged it (some repos auto-merge certain majors, such as service images into a chart), so you don't make a second bump.
 
 
 ## Working in git worktrees
