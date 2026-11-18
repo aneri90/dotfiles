@@ -198,15 +198,60 @@ def cmd_mr_wait(args):
                    "elapsed_s": clock.elapsed()})
 
 
-def merge_green(proj, iid, clock, grace):
+CHECKING = {"unchecked", "checking", "preparing", "approvals_syncing"}
+# Waiting never clears these: a person has to act on the MR.
+BLOCKED = {"not_approved", "discussions_not_resolved", "blocked_status", "jira_association_missing",
+           "requested_changes", "security_policy_violations"}
+
+
+def fresh_mr(proj, iid):
+    # Without the recheck flag GitLab may never recompute a stale `unchecked` status.
+    return api("projects/%s/merge_requests/%s?with_merge_status_recheck=true"
+               "&include_diverged_commits_count=true" % (proj, iid))
+
+
+def rebase(proj, iid, clock, sha):
+    log("MR !%s: behind the target, rebasing %s on the server" % (iid, sha[:8]))
+    try:
+        api("projects/%s/merge_requests/%s/rebase" % (proj, iid), "PUT")
+    except HttpError as err:
+        raise Done(4, {"mr": iid, "status": "rebase_refused", "http": err.status, "error": str(err)})
+    while True:
+        mr = api("projects/%s/merge_requests/%s?include_rebase_in_progress=true" % (proj, iid))
+        if mr.get("merge_error"):
+            raise Done(4, {"mr": iid, "status": "rebase_failed", "error": mr["merge_error"]})
+        if not mr.get("rebase_in_progress") and mr.get("sha") != sha:
+            return mr["sha"]
+        clock.tick({"mr": iid, "sha": sha, "status": "rebasing"})
+
+
+def merge_green(proj, iid, clock, grace, allow_rebase=True, stale_check=60):
     mr, pipe = wait_mr_pipeline(proj, iid, clock, None, grace, allow_draft=False)
     sha = mr["sha"]
-    while mr.get("detailed_merge_status") in ("unchecked", "checking", "preparing", "approvals_syncing"):
-        log("MR !%s: merge status %s" % (iid, mr.get("detailed_merge_status")))
-        clock.tick({"mr": iid, "sha": sha})
-        mr = api("projects/%s/merge_requests/%s" % (proj, iid))
+    checking_since = time.monotonic()
+    while True:
+        mr = fresh_mr(proj, iid)
         if mr.get("sha") != sha:
             raise Done(4, {"mr": iid, "status": "head_moved", "expected_sha": sha, "sha": mr.get("sha")})
+        status = mr.get("detailed_merge_status")
+        behind = (mr.get("diverged_commits_count") or 0) > 0
+        stale = status in CHECKING and behind and time.monotonic() - checking_since >= stale_check
+        if status == "need_rebase" or stale:
+            if not allow_rebase:
+                raise Done(4, {"mr": iid, "status": "behind", "sha": sha, "detailed_merge_status": status,
+                               "diverged_commits_count": mr.get("diverged_commits_count")})
+            sha = rebase(proj, iid, clock, sha)
+            mr, pipe = wait_mr_pipeline(proj, iid, clock, sha, grace, allow_draft=False)
+            checking_since = time.monotonic()
+            continue
+        if status == "conflict":
+            raise Done(4, {"mr": iid, "status": "conflict", "sha": sha})
+        if status in BLOCKED:
+            raise Done(2, {"mr": iid, "status": "blocked", "detailed_merge_status": status, "sha": sha})
+        if status not in CHECKING:
+            break
+        log("MR !%s: merge status %s%s" % (iid, status, ", behind the target" if behind else ""))
+        clock.tick({"mr": iid, "sha": sha, "detailed_merge_status": status})
     try:
         # never auto-merge: merge only the head whose pipeline we saw green
         res = api("projects/%s/merge_requests/%s/merge" % (proj, iid), "PUT", {"sha": sha})
@@ -224,7 +269,7 @@ def cmd_mr_merge(args):
     proj = project(args)
     iid = resolve_mr(args, proj)
     clock = Clock(args.timeout, args.interval)
-    result = merge_green(proj, iid, clock, args.no_pipeline_grace)
+    result = merge_green(proj, iid, clock, args.no_pipeline_grace, not args.no_rebase, args.stale_check)
     raise Done(0, dict(result, elapsed_s=clock.elapsed()))
 
 
@@ -355,7 +400,7 @@ def cmd_deploy_bump(args):
             break
         log("%s has %d running pipeline(s), waiting" % (args.branch, len(busy)))
         clock.tick({"mr": iid, "status": "target_busy"})
-    result = merge_green(proj, iid, clock, args.no_pipeline_grace)
+    result = merge_green(proj, iid, clock, args.no_pipeline_grace, not args.no_rebase, args.stale_check)
     others = [p for p in busy_pipelines(proj, args.branch) if p.get("sha") != result.get("merge_commit_sha")]
     raise Done(0, dict(result, version=args.version, concurrent=bool(others), elapsed_s=clock.elapsed()))
 
@@ -381,6 +426,11 @@ def build_parser():
     p = sub.add_parser("mr-merge", help="wait green on the head, then merge that exact SHA")
     p.add_argument("iid", nargs="?")
     p.add_argument("--no-pipeline-grace", type=float, default=120)
+    p.add_argument("--no-rebase", action="store_true",
+                   help="exit 4 (behind) instead of rebasing a branch the target has moved past")
+    # A branch behind the target can sit in `unchecked` indefinitely after a release commit lands.
+    p.add_argument("--stale-check", type=float, default=60,
+                   help="seconds a behind MR may stay unchecked before it is rebased (default 60)")
     common(p)
     p.set_defaults(func=cmd_mr_merge)
 
@@ -408,6 +458,8 @@ def build_parser():
     p.add_argument("--version", required=True)
     p.add_argument("--message")
     p.add_argument("--no-pipeline-grace", type=float, default=120)
+    p.add_argument("--no-rebase", action="store_true")
+    p.add_argument("--stale-check", type=float, default=60)
     common(p)
     p.set_defaults(func=cmd_deploy_bump)
     return parser

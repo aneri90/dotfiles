@@ -13,13 +13,15 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 GLFLOW = os.path.join(HERE, "..", "..", "localbin", ".local", "bin", "glflow")
 FAKE = os.path.join(HERE, "fake_glab.py")
-MR = r"projects/g%2Fr/merge_requests/7$"
+MR = r"projects/g%2Fr/merge_requests/7(\?|$)"
 PIPES = r"projects/g%2Fr/merge_requests/7/pipelines"
 
 
-def mr(sha="aaa", state="opened", draft=False, merge_status="mergeable", merge_commit=None):
-    return {"iid": 7, "sha": sha, "state": state, "draft": draft,
-            "detailed_merge_status": merge_status, "merge_commit_sha": merge_commit}
+def mr(sha="aaa", state="opened", draft=False, merge_status="mergeable", merge_commit=None, behind=0,
+       rebasing=False):
+    return {"iid": 7, "sha": sha, "state": state, "draft": draft, "detailed_merge_status": merge_status,
+            "merge_commit_sha": merge_commit, "diverged_commits_count": behind,
+            "rebase_in_progress": rebasing}
 
 
 class GlflowTest(unittest.TestCase):
@@ -109,6 +111,80 @@ class GlflowTest(unittest.TestCase):
         ], "mr-merge", "7")
         self.assertEqual((code, out["status"], out["http"]), (4, "merge_refused", 409))
 
+    def test_merge_status_is_rechecked(self):
+        _, _, calls = self.run_glflow([
+            {"match": MR, "responses": [{"body": mr()}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+            {"method": "PUT", "match": r"merge_requests/7/merge$", "responses": [{"body": {"state": "merged"}}]},
+        ], "mr-merge", "7")
+        self.assertTrue([c for c in calls if "with_merge_status_recheck=true" in c["path"]])
+
+    def test_need_rebase_rebases_and_merges_the_new_green_head(self):
+        code, out, calls = self.run_glflow([
+            {"method": "PUT", "match": r"merge_requests/7/rebase$", "responses": [{"body": {}}]},
+            {"method": "PUT", "match": r"merge_requests/7/merge$",
+             "responses": [{"body": {"state": "merged", "merge_commit_sha": "mmm"}}]},
+            {"match": MR, "responses": [
+                {"body": mr(merge_status="need_rebase", behind=1)},
+                {"body": mr(merge_status="need_rebase", behind=1)},
+                {"body": mr(sha="bbb", rebasing=True)},
+                {"body": mr(sha="bbb")}]},
+            {"match": PIPES, "responses": [
+                {"body": [{"id": 1, "sha": "aaa", "status": "success"}]},
+                {"body": [{"id": 2, "sha": "bbb", "status": "running"},
+                          {"id": 1, "sha": "aaa", "status": "success"}]},
+                {"body": [{"id": 2, "sha": "bbb", "status": "success"}]}]},
+        ], "mr-merge", "7")
+        self.assertEqual((code, out["sha"], out["pipeline_id"]), (0, "bbb", 2))
+        merges = [c for c in calls if c["method"] == "PUT" and c["path"].endswith("/merge")]
+        self.assertEqual(merges[0]["fields"], ["sha=bbb"])
+
+    def test_unchecked_while_behind_is_rebased_after_the_stale_window(self):
+        code, out, calls = self.run_glflow([
+            {"method": "PUT", "match": r"merge_requests/7/rebase$", "responses": [{"body": {}}]},
+            {"method": "PUT", "match": r"merge_requests/7/merge$", "responses": [{"body": {"state": "merged"}}]},
+            {"match": MR, "responses": [
+                {"body": mr(merge_status="unchecked", behind=1)},
+                {"body": mr(merge_status="unchecked", behind=1)},
+                {"body": mr(sha="bbb")}]},
+            {"match": PIPES, "responses": [
+                {"body": [{"id": 1, "sha": "aaa", "status": "success"}]},
+                {"body": [{"id": 2, "sha": "bbb", "status": "success"}]}]},
+        ], "mr-merge", "7", "--stale-check", "0")
+        self.assertEqual((code, out["sha"]), (0, "bbb"))
+        self.assertTrue([c for c in calls if c["path"].endswith("/rebase")])
+
+    def test_unchecked_but_current_keeps_waiting_without_rebasing(self):
+        code, out, calls = self.run_glflow([
+            {"match": MR, "responses": [{"body": mr(merge_status="unchecked")}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+        ], "mr-merge", "7", "--stale-check", "0", "--timeout", "0")
+        self.assertEqual((code, out["status"]), (3, "timeout"))
+        self.assertFalse([c for c in calls if c["method"] == "PUT"])
+
+    def test_no_rebase_reports_behind(self):
+        code, out, calls = self.run_glflow([
+            {"match": MR, "responses": [{"body": mr(merge_status="need_rebase", behind=2)}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+        ], "mr-merge", "7", "--no-rebase")
+        self.assertEqual((code, out["status"], out["diverged_commits_count"]), (4, "behind", 2))
+        self.assertFalse([c for c in calls if c["method"] == "PUT"])
+
+    def test_conflict_exits_4_without_merging(self):
+        code, out, calls = self.run_glflow([
+            {"match": MR, "responses": [{"body": mr(merge_status="conflict", behind=1)}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+        ], "mr-merge", "7")
+        self.assertEqual((code, out["status"]), (4, "conflict"))
+        self.assertFalse([c for c in calls if c["method"] == "PUT"])
+
+    def test_unapproved_exits_2_without_waiting(self):
+        code, out, _ = self.run_glflow([
+            {"match": MR, "responses": [{"body": mr(merge_status="not_approved")}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+        ], "mr-merge", "7")
+        self.assertEqual((code, out["status"], out["detailed_merge_status"]), (2, "blocked", "not_approved"))
+
     def test_draft_is_not_merged(self):
         code, out, calls = self.run_glflow([
             {"match": MR, "responses": [{"body": mr(draft=True)}]},
@@ -149,6 +225,20 @@ class GlflowTest(unittest.TestCase):
             "--pattern", r"version: (?P<v>\S+)", "--version", "3.0.0")
         self.assertEqual((code, out["status"]), (0, "already"))
 
+
+    def test_deploy_bump_opens_and_merges_the_bump(self):
+        code, out, calls = self.run_glflow(self.file_routes("chart: x\n    version: 2.0.0\n") + [
+            {"match": r"merge_requests\?state=opened", "responses": [{"body": []}]},
+            {"method": "POST", "match": r"repository/commits$", "responses": [{"body": {}}]},
+            {"method": "POST", "match": r"merge_requests$", "responses": [{"body": {"iid": 7}}]},
+            {"method": "PUT", "match": r"merge_requests/7/merge$",
+             "responses": [{"body": {"state": "merged", "merge_commit_sha": "mmm"}}]},
+            {"match": MR, "responses": [{"body": mr()}]},
+            {"match": PIPES, "responses": [{"body": [{"id": 1, "sha": "aaa", "status": "success"}]}]},
+            {"match": r"projects/g%2Fr/pipelines\?ref=", "responses": [{"body": []}]},
+        ], "deploy-bump", "--branch", "test", "--file", "helmfile.yaml",
+            "--pattern", r"version: (?P<v>\S+)", "--version", "3.0.0")
+        self.assertEqual((code, out["status"], out["merge_commit_sha"]), (0, "merged", "mmm"))
 
 if __name__ == "__main__":
     unittest.main()
