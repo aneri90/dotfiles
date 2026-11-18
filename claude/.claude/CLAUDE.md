@@ -46,3 +46,9 @@
 
 - The Bash tool runs bash 5 (`CLAUDE_CODE_SHELL`). If `echo $BASH_VERSION` prints nothing, the session fell back to zsh: quote globs, pipe JSON with `printf '%s'` (not `echo`), write `${TAG}:path`, and never name a variable `path` or `status`.
 - Never print environments or files that may hold secrets (`env`, `printenv`, `cat ~/.zshenv`, a pod's env). List names only: `env | cut -d= -f1`.
+
+## Python dependencies
+
+- `uv sync` authenticates to the private index through keyring. Never export an index token, and never reach a library through `PYTHONPATH`.
+- In a new worktree, run `uv sync` before any test or import check.
+- On a 401, run `keyring get <index-url> oauth2accesstoken`; if that fails, ask the user to run `gcloud auth login`.

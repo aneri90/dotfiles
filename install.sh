@@ -67,4 +67,10 @@ done
 
 # stow has the final say: it aborts every operation if any conflict remains
 stow "${packages[@]}"
+
+# uv reads private-index credentials through keyring (uv/.config/uv/uv.toml).
+# --force: a pip-installed keyring without the Google backend may already own ~/.local/bin/keyring
+if command -v uv >/dev/null 2>&1; then
+    uv tool install --force keyring --with keyrings.google-artifactregistry-auth
+fi
 echo "Done!"

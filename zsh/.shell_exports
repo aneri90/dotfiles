@@ -37,3 +37,7 @@ for _b in /opt/homebrew/bin/bash /usr/local/bin/bash /usr/bin/bash /bin/bash; do
     fi
 done
 unset _b
+
+# uv asks keyring only for an index that has a username; the variable name is
+# derived from the index name in pyproject ([[tool.uv.index]] name = "gcp-repo")
+export UV_INDEX_GCP_REPO_USERNAME=oauth2accesstoken

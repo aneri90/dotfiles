@@ -1,0 +1,2 @@
+# uv asks keyring for index credentials (needs keyring on PATH and a username per index)
+keyring-provider = "subprocess"
