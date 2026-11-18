@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+"""Wait for and merge GitLab work without hand-written polling loops.
+
+Every command prints progress on stderr and exactly one JSON line on stdout.
+Exit codes:
+  0  condition met, or already done
+  1  terminal failure (pipeline failed/canceled, merge refused, rollout failed)
+  2  usage or precondition (MR closed or draft, ambiguous pattern)
+  3  timeout, still pending: safe to run the same command again
+  4  the head moved (SHA mismatch, conflict): re-check before retrying
+  5  nothing to wait for (no pipeline on the head, no release produced)
+"""
+import argparse
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+
+PENDING = {"created", "waiting_for_resource", "preparing", "pending", "running", "scheduled"}
+FAILED = {"failed", "canceled", "canceling", "manual", "skipped"}
+BUSY = {"created", "waiting_for_resource", "preparing", "pending", "running", "canceling"}
+
+
+class Done(Exception):
+    def __init__(self, code, payload):
+        super().__init__(payload)
+        self.code = code
+        self.payload = payload
+
+
+class HttpError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+def log(msg):
+    print("glflow: " + msg, file=sys.stderr, flush=True)
+
+
+def glab_bin():
+    return os.environ.get("GLFLOW_GLAB", "glab")
+
+
+def api(path, method="GET", fields=None, body=None, retries=3):
+    cmd = [glab_bin(), "api", path, "-X", method]
+    for key, value in (fields or {}).items():
+        cmd += ["-f", "%s=%s" % (key, value)]
+    tmp = None
+    if body is not None:
+        # glab api reads a raw JSON body only from a file
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(body, tmp)
+        tmp.close()
+        cmd += ["--input", tmp.name, "-H", "Content-Type: application/json"]
+    try:
+        last = None
+        for attempt in range(retries):
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                last = HttpError(0, "glab timed out")
+                continue
+            if proc.returncode == 0:
+                out = proc.stdout.strip()
+                return json.loads(out, strict=False) if out else None
+            match = re.search(r"HTTP (\d{3})", proc.stderr + proc.stdout)
+            status = int(match.group(1)) if match else 0
+            last = HttpError(status, (proc.stderr or proc.stdout).strip()[:300])
+            # 4xx answers are final; only transport errors and 5xx are retried
+            if 400 <= status < 500:
+                raise last
+            time.sleep(min(2 ** attempt, 5))
+        raise last
+    finally:
+        if tmp:
+            os.unlink(tmp.name)
+
+
+def project_from_remote():
+    try:
+        url = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True,
+                             text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        url = ""
+    if "://" in url:
+        path = url.split("://", 1)[1].split("/", 1)[-1] if "/" in url.split("://", 1)[1] else ""
+    elif re.match(r"^[^/]+@[^:]+:", url):
+        path = url.split(":", 1)[1]
+    else:
+        path = ""
+    if "/" not in path:
+        raise Done(2, {"error": "no --repo and no usable origin remote in the current directory"})
+    return re.sub(r"\.git$", "", path.strip("/"))
+
+
+def project(args):
+    return urllib.parse.quote(args.repo or project_from_remote(), safe="")
+
+
+def current_branch():
+    try:
+        return subprocess.run(["git", "branch", "--show-current"], capture_output=True,
+                              text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def resolve_mr(args, proj):
+    if args.iid:
+        return int(args.iid)
+    branch = current_branch()
+    if not branch:
+        raise Done(2, {"error": "no MR iid and no current branch"})
+    mrs = api("projects/%s/merge_requests?state=opened&source_branch=%s"
+              % (proj, urllib.parse.quote(branch, safe="")))
+    if not mrs:
+        raise Done(2, {"error": "no open MR for branch %s" % branch})
+    return int(mrs[0]["iid"])
+
+
+class Clock:
+    def __init__(self, timeout, interval):
+        self.start = time.monotonic()
+        self.timeout = timeout
+        self.interval = interval
+
+    def elapsed(self):
+        return round(time.monotonic() - self.start, 1)
+
+    def left(self):
+        return self.timeout - (time.monotonic() - self.start)
+
+    def tick(self, what):
+        if self.left() <= 0:
+            raise Done(3, dict(what, status="timeout", elapsed_s=self.elapsed()))
+        time.sleep(max(0, min(self.interval, self.left())))
+
+
+def failed_jobs(proj, pipeline_id):
+    try:
+        jobs = api("projects/%s/pipelines/%s/jobs?scope[]=failed&per_page=50" % (proj, pipeline_id))
+    except HttpError:
+        return []
+    return [j.get("name") for j in jobs or []]
+
+
+def wait_mr_pipeline(proj, iid, clock, expected_sha=None, grace=120, allow_draft=True):
+    """Wait for the pipeline on the MR head; return (mr, pipeline) when it is green."""
+    base = {"mr": iid}
+    first_sha = expected_sha
+    while True:
+        mr = api("projects/%s/merge_requests/%s" % (proj, iid))
+        state = mr.get("state")
+        if state == "merged":
+            raise Done(0, dict(base, status="merged", sha=mr.get("sha"),
+                               merge_commit_sha=mr.get("merge_commit_sha") or mr.get("squash_commit_sha")))
+        if state != "opened":
+            raise Done(2, dict(base, status=state, error="MR is %s" % state))
+        if mr.get("draft") and not allow_draft:
+            raise Done(2, dict(base, status="draft", error="MR is a draft"))
+        sha = mr.get("sha")
+        if first_sha is None:
+            first_sha = sha
+        elif sha != first_sha:
+            raise Done(4, dict(base, status="head_moved", expected_sha=first_sha, sha=sha))
+        pipelines = api("projects/%s/merge_requests/%s/pipelines?per_page=50" % (proj, iid)) or []
+        mine = [p for p in pipelines if p.get("sha") == sha]
+        if not mine:
+            if clock.elapsed() >= grace:
+                raise Done(5, dict(base, status="no_pipeline", sha=sha, elapsed_s=clock.elapsed()))
+            log("MR !%s: no pipeline on %s yet" % (iid, sha[:8]))
+            clock.tick(dict(base, sha=sha))
+            continue
+        pipe = max(mine, key=lambda p: p.get("id", 0))
+        status = pipe.get("status")
+        info = dict(base, sha=sha, pipeline_id=pipe.get("id"), pipeline_status=status)
+        if status == "success":
+            return mr, pipe
+        if status in FAILED:
+            raise Done(1, dict(info, status="pipeline_" + status,
+                               failed_jobs=failed_jobs(proj, pipe.get("id")), elapsed_s=clock.elapsed()))
+        log("MR !%s: pipeline %s %s" % (iid, pipe.get("id"), status))
+        clock.tick(info)
+
+
+def cmd_mr_wait(args):
+    proj = project(args)
+    iid = resolve_mr(args, proj)
+    clock = Clock(args.timeout, args.interval)
+    mr, pipe = wait_mr_pipeline(proj, iid, clock, args.sha, args.no_pipeline_grace)
+    raise Done(0, {"status": "success", "mr": iid, "sha": mr["sha"], "pipeline_id": pipe["id"],
+                   "elapsed_s": clock.elapsed()})
+
+
+def merge_green(proj, iid, clock, grace):
+    mr, pipe = wait_mr_pipeline(proj, iid, clock, None, grace, allow_draft=False)
+    sha = mr["sha"]
+    while mr.get("detailed_merge_status") in ("unchecked", "checking", "preparing", "approvals_syncing"):
+        log("MR !%s: merge status %s" % (iid, mr.get("detailed_merge_status")))
+        clock.tick({"mr": iid, "sha": sha})
+        mr = api("projects/%s/merge_requests/%s" % (proj, iid))
+        if mr.get("sha") != sha:
+            raise Done(4, {"mr": iid, "status": "head_moved", "expected_sha": sha, "sha": mr.get("sha")})
+    try:
+        # never auto-merge: merge only the head whose pipeline we saw green
+        res = api("projects/%s/merge_requests/%s/merge" % (proj, iid), "PUT", {"sha": sha})
+    except HttpError as err:
+        code = 4 if err.status == 409 else 1
+        raise Done(code, {"mr": iid, "status": "merge_refused", "http": err.status, "error": str(err),
+                          "detailed_merge_status": mr.get("detailed_merge_status")})
+    if res.get("state") != "merged":
+        raise Done(1, {"mr": iid, "status": "merge_" + str(res.get("state")), "sha": sha})
+    return {"status": "merged", "mr": iid, "sha": sha, "pipeline_id": pipe["id"],
+            "merge_commit_sha": res.get("merge_commit_sha") or res.get("squash_commit_sha")}
+
+
+def cmd_mr_merge(args):
+    proj = project(args)
+    iid = resolve_mr(args, proj)
+    clock = Clock(args.timeout, args.interval)
+    result = merge_green(proj, iid, clock, args.no_pipeline_grace)
+    raise Done(0, dict(result, elapsed_s=clock.elapsed()))
+
+
+def semver_key(tag):
+    nums = re.findall(r"\d+", tag)
+    return tuple(int(n) for n in nums[:3]) + (len(tag),)
+
+
+def cmd_wait_tag(args):
+    proj = project(args)
+    clock = Clock(args.timeout, args.interval)
+    if args.mr:
+        mr = api("projects/%s/merge_requests/%s" % (proj, args.mr))
+        if mr.get("state") != "merged":
+            raise Done(2, {"mr": int(args.mr), "status": mr.get("state"), "error": "MR is not merged"})
+        sha = mr.get("merge_commit_sha") or mr.get("squash_commit_sha") or mr.get("sha")
+    elif args.sha:
+        sha = args.sha
+    else:
+        raise Done(2, {"error": "give --mr or --sha"})
+    success_since = None
+    while True:
+        refs = api("projects/%s/repository/commits/%s/refs?type=tag&per_page=100" % (proj, sha)) or []
+        tags = [r["name"] for r in refs if re.search(r"\d+\.\d+\.\d+", r.get("name", ""))]
+        if tags:
+            # the lowest tag containing the commit is its release; a newer one may be unrelated
+            tag = min(tags, key=semver_key)
+            raise Done(0, {"status": "tagged", "tag": tag, "sha": sha, "elapsed_s": clock.elapsed()})
+        pipes = api("projects/%s/pipelines?sha=%s&ref=%s&per_page=20"
+                    % (proj, sha, urllib.parse.quote(args.ref, safe=""))) or []
+        latest = max(pipes, key=lambda p: p.get("id", 0)) if pipes else None
+        status = latest.get("status") if latest else None
+        if status == "failed":
+            raise Done(1, {"status": "pipeline_failed", "sha": sha, "pipeline_id": latest["id"],
+                           "failed_jobs": failed_jobs(proj, latest["id"])})
+        if status == "success":
+            success_since = success_since or time.monotonic()
+            if time.monotonic() - success_since >= args.release_grace:
+                raise Done(5, {"status": "no_release", "sha": sha, "pipeline_id": latest["id"]})
+        log("waiting for a tag on %s (pipeline %s)" % (sha[:8], status))
+        clock.tick({"sha": sha, "pipeline_status": status})
+
+
+def kubectl(args, extra, timeout=60):
+    cmd = ["kubectl", "--context", args.context, "-n", args.namespace] + extra
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def cmd_wait_image(args):
+    clock = Clock(args.timeout, args.interval)
+    base = {"deploy": args.deploy, "version": args.version}
+    while True:
+        proc = kubectl(args, ["get", "deploy", args.deploy, "-o", "json"])
+        if proc.returncode != 0:
+            raise Done(2, dict(base, status="kubectl_error", error=proc.stderr.strip()[:300]))
+        dep = json.loads(proc.stdout)
+        containers = dep["spec"]["template"]["spec"]["containers"]
+        box = next((c for c in containers if c["name"] == args.container), None) if args.container \
+            else containers[0]
+        if box is None:
+            raise Done(2, dict(base, status="no_container", error="no container %s" % args.container))
+        image = box["image"]
+        if image.rsplit(":", 1)[-1] == args.version:
+            break
+        log("%s runs %s" % (args.deploy, image))
+        if clock.left() <= 0:
+            raise Done(3, dict(base, status="timeout", running_image=image, elapsed_s=clock.elapsed()))
+        clock.tick(dict(base, running_image=image))
+    replicas = dep["spec"].get("replicas", 1)
+    if replicas == 0:
+        raise Done(0, dict(base, status="scaled_to_zero", image=image, replicas=0))
+    left = max(int(clock.left()), 10)
+    proc = kubectl(args, ["rollout", "status", "deploy/" + args.deploy, "--timeout=%ss" % left], left + 30)
+    if proc.returncode != 0:
+        timed_out = "exceeded" in proc.stderr or "timed out" in proc.stderr
+        raise Done(3 if timed_out else 1, dict(base, status="rollout_" + ("timeout" if timed_out else "failed"),
+                                               image=image, error=proc.stderr.strip()[:300]))
+    raise Done(0, dict(base, status="rolled_out", image=image, replicas=replicas, elapsed_s=clock.elapsed()))
+
+
+def busy_pipelines(proj, ref):
+    pipes = api("projects/%s/pipelines?ref=%s&per_page=20" % (proj, urllib.parse.quote(ref, safe=""))) or []
+    return [p for p in pipes if p.get("status") in BUSY]
+
+
+def cmd_deploy_bump(args):
+    proj = project(args)
+    clock = Clock(args.timeout, args.interval)
+    try:
+        regex = re.compile(args.pattern, re.M)
+    except re.error as err:
+        raise Done(2, {"status": "bad_pattern", "error": str(err)})
+    if "v" not in regex.groupindex:
+        raise Done(2, {"status": "bad_pattern", "error": "the pattern needs a named group (?P<v>...)"})
+    path_q = urllib.parse.quote(args.file, safe="")
+    ref_q = urllib.parse.quote(args.branch, safe="")
+    found = api("projects/%s/repository/files/%s?ref=%s" % (proj, path_q, ref_q))
+    text = base64.b64decode(found["content"]).decode("utf-8")
+    matches = list(regex.finditer(text))
+    if len(matches) != 1:
+        raise Done(2, {"status": "ambiguous_pattern", "matches": len(matches)})
+    match = matches[0]
+    if match.group("v") == args.version:
+        raise Done(0, {"status": "already", "version": args.version})
+    name = re.sub(r"[^a-z0-9]+", "-", os.path.basename(args.file).lower()).strip("-")
+    branch = "chore/bump-%s-%s" % (name, args.version)
+    opened = api("projects/%s/merge_requests?state=opened&source_branch=%s"
+                 % (proj, urllib.parse.quote(branch, safe=""))) or []
+    if opened:
+        iid = int(opened[0]["iid"])
+        log("reusing MR !%s" % iid)
+    else:
+        new_text = text[:match.start("v")] + args.version + text[match.end("v"):]
+        message = args.message or "fix(deps): ⬆️ %s %s → %s" % (name, match.group("v"), args.version)
+        api("projects/%s/repository/commits" % proj, "POST", body={
+            "branch": branch, "start_branch": args.branch, "commit_message": message,
+            "last_commit_id": found.get("last_commit_id"),
+            "actions": [{"action": "update", "file_path": args.file, "content": new_text}]})
+        created = api("projects/%s/merge_requests" % proj, "POST", body={
+            "source_branch": branch, "target_branch": args.branch, "title": message,
+            "remove_source_branch": True})
+        iid = int(created["iid"])
+        log("opened MR !%s" % iid)
+    mr, pipe = wait_mr_pipeline(proj, iid, clock, None, args.no_pipeline_grace, allow_draft=False)
+    while True:
+        busy = busy_pipelines(proj, args.branch)
+        if not busy:
+            break
+        log("%s has %d running pipeline(s), waiting" % (args.branch, len(busy)))
+        clock.tick({"mr": iid, "status": "target_busy"})
+    result = merge_green(proj, iid, clock, args.no_pipeline_grace)
+    others = [p for p in busy_pipelines(proj, args.branch) if p.get("sha") != result.get("merge_commit_sha")]
+    raise Done(0, dict(result, version=args.version, concurrent=bool(others), elapsed_s=clock.elapsed()))
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="glflow", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    def common(p, repo=True):
+        if repo:
+            p.add_argument("--repo", help="group/sub/project (default: origin remote of the cwd)")
+        p.add_argument("--timeout", type=float, default=540, help="seconds before exit 3 (default 540)")
+        p.add_argument("--interval", type=float, default=10, help="poll interval in seconds")
+
+    p = sub.add_parser("mr-wait", help="wait for the pipeline on the MR head")
+    p.add_argument("iid", nargs="?")
+    p.add_argument("--sha", help="the head you expect; exit 4 if the MR moved")
+    p.add_argument("--no-pipeline-grace", type=float, default=120)
+    common(p)
+    p.set_defaults(func=cmd_mr_wait)
+
+    p = sub.add_parser("mr-merge", help="wait green on the head, then merge that exact SHA")
+    p.add_argument("iid", nargs="?")
+    p.add_argument("--no-pipeline-grace", type=float, default=120)
+    common(p)
+    p.set_defaults(func=cmd_mr_merge)
+
+    p = sub.add_parser("wait-tag", help="wait for the release tag that contains a commit")
+    p.add_argument("--mr", help="merged MR iid (uses its merge commit)")
+    p.add_argument("--sha")
+    p.add_argument("--ref", default="main")
+    p.add_argument("--release-grace", type=float, default=60)
+    common(p)
+    p.set_defaults(func=cmd_wait_tag)
+
+    p = sub.add_parser("wait-image", help="wait for a deployment to run an image tag, then its rollout")
+    p.add_argument("--context", required=True)
+    p.add_argument("--namespace", required=True)
+    p.add_argument("--deploy", required=True)
+    p.add_argument("--version", required=True)
+    p.add_argument("--container")
+    common(p, repo=False)
+    p.set_defaults(func=cmd_wait_image)
+
+    p = sub.add_parser("deploy-bump", help="bump a version in a deploy repo through an MR, merged when idle")
+    p.add_argument("--branch", required=True, help="target branch, e.g. test")
+    p.add_argument("--file", required=True)
+    p.add_argument("--pattern", required=True, help="regex with one named group (?P<v>...), one match")
+    p.add_argument("--version", required=True)
+    p.add_argument("--message")
+    p.add_argument("--no-pipeline-grace", type=float, default=120)
+    common(p)
+    p.set_defaults(func=cmd_deploy_bump)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    code, payload = 0, {}
+    try:
+        args.func(args)
+    except Done as done:
+        code, payload = done.code, done.payload
+    except HttpError as err:
+        code, payload = 1, {"status": "http_error", "http": err.status, "error": str(err)}
+    except KeyboardInterrupt:
+        code, payload = 3, {"status": "interrupted"}
+    payload = dict({"ok": code == 0, "cmd": args.cmd, "exit": code}, **payload)
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

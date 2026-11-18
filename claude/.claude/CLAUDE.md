@@ -52,3 +52,11 @@
 - `uv sync` authenticates to the private index through keyring. Never export an index token, and never reach a library through `PYTHONPATH`.
 - In a new worktree, run `uv sync` before any test or import check.
 - On a 401, run `keyring get <index-url> oauth2accesstoken`; if that fails, ask the user to run `gcloud auth login`.
+
+## GitLab and deploy waits
+
+- Do not write polling loops. Use `glflow` (`mr-wait`, `mr-merge`, `wait-tag`, `wait-image`, `deploy-bump`); `glflow <cmd> --help` lists the flags.
+- Run it with a Bash timeout of 600000 and read the last stdout line as JSON. Exit 3 means still pending: run the same command again. Exit 4 means the head moved: re-check before retrying.
+- Never use `glab mr merge --auto-merge`; merge with `glflow mr-merge`, which merges only the SHA it saw green.
+- After a release, take the version from `glflow wait-tag --mr <iid>`, never the newest tag.
+- A green deploy pipeline is not proof: finish every deploy with `glflow wait-image`.
