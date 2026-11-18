@@ -58,7 +58,7 @@ are still co-deployed inside the aipen AKS cluster and Grafana until their cutov
 An alert from the new stack carries `cluster="aicore-test-gke"`.
 
 - `test`:
-  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west8_aicore-test-gke`
+  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west1_aicore-test-gke`
   - `K8S_NAMESPACE=aicore-test`
   - `GRAFANA_URL=https://whitecrow1342.grafana.net`
   - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AICORE`
@@ -66,8 +66,9 @@ An alert from the new stack carries `cluster="aicore-test-gke"`.
     `ai-core-2/infra/aicore-iac/infra/alerting`.
   - The free stack sleeps when idle: the first API call can answer `{"code":"Loading"}`;
     retry every 10 s until it returns JSON data.
-  - The AKS namespace `aicore-test` may still exist as a rollback target with every key disabled;
-    it gets no traffic, so don't triage from it.
+  - aicore was uninstalled from the AKS `aipen-test-k8s/aicore-test` namespace on 2026-11-12. A TEST
+    aicore alert from the aipen Grafana, or one with `cluster="aipen-test-k8s"`, comes from leftovers
+    there, not from GKE TEST.
 - `prod`, `dev` (same context/Grafana as aipen, only the namespace differs):
   - `K8S_CONTEXT=aipen-{ENV}-k8s`
   - `K8S_NAMESPACE=aicore-{ENV}`
