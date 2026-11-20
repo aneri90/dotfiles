@@ -52,7 +52,7 @@ brew "k9s"
 brew "kubeconform"
 
 # --- cloud CLIs ---
-brew "azure-cli"
+cask "azure-cli"
 cask "gcloud-cli"
 
 # --- AI coding agents ---
