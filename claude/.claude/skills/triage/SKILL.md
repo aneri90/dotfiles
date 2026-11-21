@@ -16,7 +16,9 @@ a cluster, never run `terraform`, never commit.
 - **Product** — from the `Service` name prefix, hostnames, or the `Environment`/namespace:
   - `sisred-*`, `sisred-prod`, `sisred-test` → **sisred**
   - `aipen-*`, `aipen.maggiolicloud.it`, `aipen-prod` → **aipen**
-  - `aicore-*`, `aicore-prod`, `aicore-chat` → **aicore** (test runs on its own GKE cluster, prod/dev still in the aipen cluster — see §2)
+  - `aicore-*`, `ai-core-*` (the OTel service names, e.g. `ai-core-agents`), `aicore-prod`,
+    `aicore-test-gke`/`aicore-prod-gke`, `aicore.maggioliresearch.net` → **aicore** (test and
+    prod each run on their own GKE cluster and share one Grafana stack — see §2)
   - `perfetto-*` → **perfetto**
   - `mindy-*` (`mindy-webapp`, `mindy-webapp-helm`, `mindy-core`), `mindy-test`/`mindy-prod`
     → **mindy** (two apps in one namespace — see §2)
@@ -35,7 +37,8 @@ querying — easy for the user to spot a misdetect.
 
 Select the block for the detected product. `{ENV}` is the environment from §1.
 `LOKI_DATASOURCE_UID` / `TEMPO_DATASOURCE_UID` are the standard Grafana Cloud UIDs for all
-five (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
+five (verify once via `/api/datasources` for aipen/perfetto if a query 404s; verified for
+aicore on 2026-11-21):
 
 - `LOKI_DATASOURCE_UID=grafanacloud-logs`
 - `TEMPO_DATASOURCE_UID=grafanacloud-traces`
@@ -51,32 +54,49 @@ five (verify once via `/api/datasources` for aipen/perfetto if a query 404s):
 - `K8S_NAMESPACE=aipen-{ENV}`
 - `GRAFANA_URL=https://aipenmonitoring.grafana.net`
 - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
+- aicore is not in these clusters or in this Grafana any more (removed 2026-11-21; its PROD
+  logs from before about 09:20 UTC of that day stay here until retention expires). aipen-core
+  still calls it over HTTPS at `aicore.maggioliresearch.net`: when an aipen trace fails on that
+  hop, switch to the aicore block, env **prod** (aipen-test uses the prod gateway too).
 
-### aicore  (envs: dev, test, prod)
-Since 2026-10-23 **test** runs on its own GKE cluster with its own Grafana stack; **prod and dev**
-are still co-deployed inside the aipen AKS cluster and Grafana until their cutover (aicore-chart#35).
-An alert from the new stack carries `cluster="aicore-test-gke"`.
+### aicore  (envs: test, prod)
+aicore runs on its own GKE Autopilot clusters, with one Grafana stack for both environments
+(**test** since 2026-10-23, **prod** since 2026-11-21). Tell the environments apart by the
+`namespace` label, or by `cluster` (`aicore-test-gke`, `aicore-prod-gke`) on the metric rules
+that carry no namespace. aicore is no longer in the aipen AKS clusters or the aipen Grafana.
 
-- `test`:
-  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west1_aicore-test-gke`
-  - `K8S_NAMESPACE=aicore-test`
+- Both environments:
   - `GRAFANA_URL=https://whitecrow1342.grafana.net`
   - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AICORE`
-  - Deploy source of truth: `ai-core-2/infra/aicore-deploy` (branch `test`), alert rules in
-    `ai-core-2/infra/aicore-iac/infra/alerting`.
+  - Deploy values: `ai-core-2/infra/aicore-deploy`, `values/{ENV}/aicore.yaml` (branch `test`
+    for test, `main` for prod). Alert rules: `ai-core-2/infra/aicore-iac/infra/alerting` (one
+    rule set for both environments, applied from branch `test`).
   - The free stack sleeps when idle: the first API call can answer `{"code":"Loading"}`;
     retry every 10 s until it returns JSON data.
-  - aicore was uninstalled from the AKS `aipen-test-k8s/aicore-test` namespace on 2026-11-12. A TEST
-    aicore alert from the aipen Grafana, or one with `cluster="aipen-test-k8s"`, comes from leftovers
-    there, not from GKE TEST.
-- `prod`, `dev` (same context/Grafana as aipen, only the namespace differs):
-  - `K8S_CONTEXT=aipen-{ENV}-k8s`
-  - `K8S_NAMESPACE=aicore-{ENV}`
-  - `GRAFANA_URL=https://aipenmonitoring.grafana.net`
-  - `GRAFANA_TOKEN_ENV=GRAFANA_TOKEN_AIPEN`
-
-Deploy source of truth for prod/dev: repo `aipen/infra/aipen-deploy` (helmfile, branch-per-env
-dev/test/main; `values/<env>/aicore.yaml`; per-service resources under `services.<name>.resources`).
+- `test`:
+  - `K8S_CONTEXT=gke_aicore-dev-510407_europe-west1_aicore-test-gke` (a kubeconfig may still
+    list a `europe-west8` context of the same name: that cluster is gone)
+  - `K8S_NAMESPACE=aicore-test`
+  - Data stores (project `aicore-dev-510407`): Cloud SQL `aicore-test-pg-ew1` (zonal),
+    Memorystore `aicore-test-redis` (BASIC, no replica)
+- `prod`:
+  - `K8S_CONTEXT=gke_aicore-prod_europe-west1_aicore-prod-gke`
+  - `K8S_NAMESPACE=aicore-prod`
+  - Data stores (project `aicore-prod`): Cloud SQL `aicore-prod-pg-ew1` (PostgreSQL 16,
+    REGIONAL), Memorystore `aicore-prod-redis` (Redis 7.2, STANDARD_HA). Secrets come from GCP
+    Secret Manager through External Secrets.
+- `SERVICE`: logs and traces use `service_name="ai-core-<component>"` (`ai-core-agents`,
+  `ai-core-apigateway`, `ai-core-skills-fast-worker`, …); there is no `app` label. The
+  Deployment is `aicore-<component>` and its pods carry `app.kubernetes.io/component=<component>`.
+- Known behaviours, to rule out before blaming the code:
+  - After a Memorystore failover (maintenance included) the pods stay Ready but requests keep
+    failing (500/502, `Connection closed by server`) until the pods restart (client-library#76).
+    Workaround to suggest to the user: `kubectl rollout restart` the Deployments that have
+    replicas.
+  - A worker lane scales from zero, and Autopilot may have to add a node: the first job after
+    an idle period waits about 1–2 minutes. That is a cold start, not a stuck job.
+  - Autopilot scales nodes down and moves pods: restarts, `Killing` events and short 502s that
+    line up with a node removal are that, not a crash.
 
 ### perfetto  (envs: test, prod)
 - `K8S_CONTEXT` — explicit map (the GCP **project** segment changes per env, so don't
@@ -107,8 +127,8 @@ real cause (§4/§5).
 1. Token: `[ -n "${!GRAFANA_TOKEN_ENV}" ] || echo MISSING`. If missing, stop and tell the
    user to `export ${GRAFANA_TOKEN_ENV}=...` (read-only token). Set `TOKEN="${!GRAFANA_TOKEN_ENV}"`.
 2. Substitute the environment into the namespace/context. Grafana URL/token/datasources do
-   **not** change per env — one product-Grafana holds every env, keyed by the `namespace` label.
-   The exception is aicore test, which has its own context and Grafana (§2):
+   **not** change per env — one product-Grafana holds every env, keyed by the `namespace` label
+   (aicore included):
 
    ```bash
    ENV="prod"                                      # from §1, else test
@@ -116,12 +136,12 @@ real cause (§4/§5).
    K8S_CONTEXT="${K8S_CONTEXT//\{ENV\}/$ENV}"       # sisred-{ENV}-k8s -> sisred-prod-k8s
    ```
 
-   For perfetto, mindy and aicore test, take `K8S_CONTEXT` from §2 rather than substituting.
+   For perfetto, mindy and aicore, take `K8S_CONTEXT` and `K8S_NAMESPACE` from §2 rather than substituting.
 3. Verify the context exists (read-only); never silently fall back to the current context:
 
    ```bash
    kubectl config get-contexts -o name | grep -Fxq "$K8S_CONTEXT" \
-     || kubectl config get-contexts -o name | grep -iE 'sisred|aipen|perfetto|mindy'
+     || kubectl config get-contexts -o name | grep -iE 'sisred|aipen|aicore|perfetto|mindy'
    ```
 
    If absent, pick the matching one from that list or ask the user.
@@ -157,7 +177,8 @@ curl -sG -H "Authorization: Bearer $TOKEN" \
 ```
 
 By service + error level (no traceId): swap the query for
-`{namespace="$K8S_NAMESPACE",app="$SERVICE"} |~ "(?i)error|exception|failed"`.
+`{namespace="$K8S_NAMESPACE",app="$SERVICE"} |~ "(?i)error|exception|failed"`
+(aicore: `service_name="$SERVICE"` instead of `app`, see §2).
 If a query returns 0 results, confirm label names via `/loki/api/v1/labels` — schemas drift.
 
 ## 6. Cluster probes (read-only) + cross-service hops
@@ -172,6 +193,9 @@ kubectl --context "$K8S_CONTEXT" -n "$K8S_NAMESPACE" get events --sort-by=.lastT
 kubectl --context "$K8S_CONTEXT" -n "$K8S_NAMESPACE" get deploy $SERVICE -o yaml
 ```
 
+For aicore the selector is `-l app.kubernetes.io/component=<component>` and the Deployment is
+`aicore-<component>` (§2). Most worker lanes sit at 0 replicas when idle: no pods is normal.
+
 **Hard rule — read-only.** Never run `apply`/`create`/`delete`/`patch`/`edit`/`replace`/
 `scale`/`rollout`/`cordon`/`drain`/`exec`/`port-forward`/`cp`/`attach`. If diagnosis needs a
 write, surface the suggested command to the user and stop.
@@ -179,6 +203,8 @@ write, surface the suggested command to the user and stop.
 **Cross-service hop**: if the failing span points at another product (e.g. sisred → aipen
 403), stay in this skill — just switch to that product's config block (§2), **carry the same
 environment** (a `sisred-prod` alert → investigate aipen in **prod**), and repeat §3–§6.
+Exception: a hop into aicore goes to **prod** unless the caller's URL says `aicore-test`,
+because the test environments of aipen and Mindy call the prod gateway.
 
 ## 7. RCA output (post in chat)
 
@@ -212,8 +238,8 @@ curl -sG -H "Authorization: Bearer $TOKEN" \
 ```
 
 `grafanacloud_org_logs_usage` is GB used month-to-date; `_included_usage` is 50. The aipen
-stack is shared by aipen **and** aicore prod/dev, so its number is their **combined** total; the
-mindy stack and the aicore test stack (`whitecrow1342`) are standalone. Grafana
+stack serves aipen only since 2026-11-21 (before that it also held aicore prod); the
+mindy stack and the aicore stack (`whitecrow1342`, test and prod) are standalone. Grafana
 drops logs once the cap is exceeded. To attribute volume, find top talkers with
 `sum by (pod) (bytes_over_time({namespace="<ns>"}[6h]))` on `grafanacloud-logs`. A `logs-usage`
 alert (warn 80% / crit 100%) is provisioned per org in each `*-iac/infra/alerting/`.
